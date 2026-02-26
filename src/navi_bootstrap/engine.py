@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Project Navi
+
 """Stages 2 (Plan) and 3 (Render) of the nboot engine."""
 
 from __future__ import annotations

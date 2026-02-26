@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Project Navi
+
 """Stage 4: Post-render validation runner."""
 
 from __future__ import annotations

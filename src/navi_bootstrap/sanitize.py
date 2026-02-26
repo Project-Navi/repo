@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Project Navi
+
 """Input sanitization for hostile spec and manifest values.
 
 Sanitize-and-warn, never error. The pipeline must always produce output.

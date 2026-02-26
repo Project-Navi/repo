@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Project Navi
+
 """Manifest loading and validation."""
 
 from __future__ import annotations

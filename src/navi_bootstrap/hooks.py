@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Project Navi
+
 """Stage 5: Post-render hook runner."""
 
 from __future__ import annotations

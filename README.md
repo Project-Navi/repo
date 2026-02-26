@@ -1,6 +1,10 @@
-# navi-bootstrap
+# repo
+
+A repo called `repo` that bootstraps repos. The CLI is `nboot`. The irony is the feature.
 
 Spec-driven rendering engine and template packs for bootstrapping projects to production-grade posture. CI, security scanning, code review, release pipelines, quality gates — defined once as template packs, applied to any project with a single command.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ```bash
 # Apply packs to an existing project
@@ -116,7 +120,7 @@ src/navi_bootstrap/
 
 ```bash
 uv sync                                          # Install dependencies
-uv run pytest tests/ -v                          # Run tests (71 passing)
+uv run pytest tests/ -v                          # Run tests (162 passing)
 uv run ruff check src/navi_bootstrap/ tests/     # Lint
 uv run ruff format src/navi_bootstrap/ tests/    # Format
 uv run mypy src/navi_bootstrap/                  # Type check
@@ -133,3 +137,7 @@ This project was designed and built by two Claude Code instances (alpha and brav
 ---
 
 *I built this because I'm lazy — which, I'm told, is the adoptive parent of invention.*
+
+## License
+
+[MIT](LICENSE) — Copyright (c) 2026 Project Navi
