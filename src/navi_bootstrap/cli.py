@@ -53,7 +53,10 @@ def validate(spec: Path, pack: Path | None) -> None:
 @click.option("--out", type=click.Path(path_type=Path), default=None)
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--skip-resolve", is_flag=True, default=False, help="Skip SHA resolution (offline)")
-def render_cmd(spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_resolve: bool) -> None:
+@click.option("--trust", is_flag=True, default=False, help="Execute hooks from manifest (unsafe)")
+def render_cmd(
+    spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_resolve: bool, trust: bool
+) -> None:
     """Render a template pack into a new project (greenfield)."""
     try:
         spec_data = load_spec(spec)
@@ -107,10 +110,16 @@ def render_cmd(spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_res
     # Stage 5: Hooks
     hooks = manifest.get("hooks", [])
     if hooks:
-        click.echo("Running hooks...")
-        for r in run_hooks(hooks, output_dir):
-            status = "OK" if r.success else "FAIL"
-            click.echo(f"  [{status}] {r.command}")
+        if trust:
+            click.echo("Running hooks...")
+            for r in run_hooks(hooks, output_dir):
+                status = "OK" if r.success else "FAIL"
+                click.echo(f"  [{status}] {r.command}")
+        else:
+            click.echo("Skipped hooks (manifest commands not trusted):")
+            for h in hooks:
+                click.echo(f"  {h}")
+            click.echo("Pass --trust to execute.")
 
 
 @cli.command()
@@ -121,7 +130,12 @@ def render_cmd(spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_res
 )
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--skip-resolve", is_flag=True, default=False, help="Skip SHA resolution (offline)")
-def apply(spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: bool) -> None:
+@click.option(
+    "--trust", is_flag=True, default=False, help="Execute hooks/validations from manifest (unsafe)"
+)
+def apply(
+    spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: bool, trust: bool
+) -> None:
     """Apply a template pack to an existing project."""
     try:
         spec_data = load_spec(spec)
@@ -165,26 +179,39 @@ def apply(spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: boo
     )
     click.echo(f"Applied {len(written)} files to {target}")
 
-    # Stage 4: Validate
+    # Stage 4: Validate + Stage 5: Hooks
     validations = manifest.get("validation", [])
-    if validations:
-        click.echo("Running validations...")
-        for r in run_validations(validations, target):
-            if r.skipped:
-                status = "SKIP"
-            elif r.passed:
-                status = "PASS"
-            else:
-                status = "FAIL"
-            click.echo(f"  [{status}] {r.description}")
-
-    # Stage 5: Hooks
     hooks = manifest.get("hooks", [])
-    if hooks:
-        click.echo("Running hooks...")
-        for h in run_hooks(hooks, target):
-            status = "OK" if h.success else "FAIL"
-            click.echo(f"  [{status}] {h.command}")
+
+    if trust:
+        if validations:
+            click.echo("Running validations...")
+            for r in run_validations(validations, target):
+                if r.skipped:
+                    status = "SKIP"
+                elif r.passed:
+                    status = "PASS"
+                else:
+                    status = "FAIL"
+                click.echo(f"  [{status}] {r.description}")
+
+        if hooks:
+            click.echo("Running hooks...")
+            for h in run_hooks(hooks, target):
+                status = "OK" if h.success else "FAIL"
+                click.echo(f"  [{status}] {h.command}")
+    else:
+        skipped: list[str] = []
+        for v in validations:
+            cmd = v.get("command")
+            if cmd:
+                skipped.append(cmd)
+        skipped.extend(hooks)
+        if skipped:
+            click.echo("Skipped validations/hooks (manifest commands not trusted):")
+            for s in skipped:
+                click.echo(f"  {s}")
+            click.echo("Pass --trust to execute.")
 
 
 @cli.command("diff")
