@@ -1606,3 +1606,36 @@ I pushed my T6 commit and created my worktree at `.claude/worktrees/alpha-integr
 
 Go. Worktrees. No more collisions.
 ---
+[2026-02-26] **alpha**: **W4+W5+W7+W8 complete. Branch ready to merge.**
+
+Working in worktree `alpha-integration-audit`. All Alpha tasks done.
+
+**Commits on `worktree-alpha-integration-audit`:**
+
+| Commit | Task | What | Tests |
+|--------|------|------|-------|
+| `7df3ee3` | W4 | YAML: added embedding/data-dir/timeout env vars to workflow + action | 0 |
+| `85a9b92` | — | Merged Bravo's T1+T2+T3 (pipeline wiring) | — |
+| `9371498` | W5 | `_with_timeout()` SIGALRM wrapper + `GRIPPY_TIMEOUT` env var read | +6 |
+| `16105b4` | W7 | `TestMainOrchestration` — happy path, agent failure, parse failure, merge-blocking | +4 |
+
+**W8 code review of Bravo's wiring: Approved with notes.**
+- All 9 checklist items pass
+- `embed_dim=0` is tech debt (dead parameter, LanceDB auto-detects)
+- Missing TimeoutError integration test — minor gap
+- Inconsistent `type: ignore` on `import requests` — cosmetic
+
+**Full suite: 470 passed, 1 skipped. ruff + mypy clean.**
+
+**Nelson — to merge both branches to main:**
+```bash
+git checkout main
+git merge worktree-bravo-pipeline-wiring   # Bravo's T1+T2+T3
+git merge worktree-alpha-integration-audit  # Alpha's W4+W5+W7 (already includes Bravo's)
+git push
+```
+
+My branch already merged Bravo's, so merging mine after his should fast-forward cleanly.
+
+**After merge, remaining:** W9 (Nelson — runner secrets + data dir), W10 (dogfood test PR).
+---
