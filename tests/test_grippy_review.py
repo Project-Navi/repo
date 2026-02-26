@@ -395,15 +395,14 @@ class TestFetchPrDiffForkHandling:
         assert "55" in call_url
 
 
-# --- C2: post_comment upserts instead of creating duplicates ---
+# --- post_comment: new comment per review round ---
 
 
 class TestPostComment:
     @patch("github.Github")
-    def test_creates_new_comment_when_none_exists(self, mock_gh_cls: MagicMock) -> None:
-        """First review creates a new comment."""
+    def test_creates_new_comment(self, mock_gh_cls: MagicMock) -> None:
+        """Each review round creates a new comment."""
         mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = []
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
@@ -411,39 +410,21 @@ class TestPostComment:
         post_comment("token", "org/repo", 42, f"Review body\n{COMMENT_MARKER}")
 
         mock_pr.create_issue_comment.assert_called_once()
-        mock_pr.get_issue_comments.assert_called_once()
 
     @patch("github.Github")
-    def test_edits_existing_comment_on_rerun(self, mock_gh_cls: MagicMock) -> None:
-        """Re-run edits existing Grippy comment instead of creating duplicate."""
+    def test_does_not_edit_existing_comments(self, mock_gh_cls: MagicMock) -> None:
+        """Re-run creates a new comment, does not edit old ones."""
         existing_comment = MagicMock()
         existing_comment.body = f"Old review\n{COMMENT_MARKER}"
         mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = [existing_comment]
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
         post_comment("token", "org/repo", 42, f"New review\n{COMMENT_MARKER}")
 
-        existing_comment.edit.assert_called_once()
-        mock_pr.create_issue_comment.assert_not_called()
-
-    @patch("github.Github")
-    def test_ignores_non_grippy_comments(self, mock_gh_cls: MagicMock) -> None:
-        """Other comments on the PR are not touched."""
-        other_comment = MagicMock()
-        other_comment.body = "Looks good to me!"
-        mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = [other_comment]
-        mock_repo = MagicMock()
-        mock_repo.get_pull.return_value = mock_pr
-        mock_gh_cls.return_value.get_repo.return_value = mock_repo
-
-        post_comment("token", "org/repo", 42, f"Review\n{COMMENT_MARKER}")
-
         mock_pr.create_issue_comment.assert_called_once()
-        other_comment.edit.assert_not_called()
+        existing_comment.edit.assert_not_called()
 
 
 # --- T2: make_embed_fn ---

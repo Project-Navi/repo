@@ -277,24 +277,16 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
 
 
 def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
-    """Post or update a Grippy review comment on a PR.
+    """Post a new Grippy review comment on a PR.
 
-    Searches for an existing comment containing COMMENT_MARKER and edits
-    it instead of creating a duplicate (C2 fix).
+    Each review round gets its own comment so the review history is
+    visible in the PR timeline.
     """
     from github import Github
 
     gh = Github(token)
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
-
-    # Look for existing Grippy comment to edit
-    for comment in pr.get_issue_comments():
-        if COMMENT_MARKER in comment.body:
-            comment.edit(body)
-            return
-
-    # No existing comment — create new
     pr.create_issue_comment(body)
 
 
