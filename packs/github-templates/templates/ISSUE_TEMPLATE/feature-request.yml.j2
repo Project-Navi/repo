@@ -37,7 +37,7 @@ body:
       label: Feature Category
       description: Select the category that best describes this feature.
       options:
-{% for cat in spec.github.feature_categories | default(["New Feature", "Enhancement", "Integration", "Developer Experience", "Documentation"]) %}
+{% for cat in spec.github.feature_categories | default(["New Feature", "Enhancement", "Integration", "Developer Experience", "Documentation"]) -%}
         - {{ cat }}
 {% endfor %}
     validations:

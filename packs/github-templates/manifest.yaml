@@ -51,6 +51,9 @@ validation:
   - description: Bug report form is valid YAML
     command: python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/bug_report.yml'))"
     expect: exit_code_0
+  - description: Feature request form is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/feature_request.yml'))"
+    expect: exit_code_0
 
 decisions:
   - question: "What bug categories fit this project?"

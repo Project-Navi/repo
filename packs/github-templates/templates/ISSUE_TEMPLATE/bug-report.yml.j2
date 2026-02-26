@@ -58,7 +58,7 @@ body:
       label: Bug Category
       description: Select the category that best describes this bug.
       options:
-{% for cat in spec.github.bug_categories | default(["Bug", "Performance", "Security", "Documentation", "Developer Experience"]) %}
+{% for cat in spec.github.bug_categories | default(["Bug", "Performance", "Security", "Documentation", "Developer Experience"]) -%}
         - {{ cat }}
 {% endfor %}
     validations:
