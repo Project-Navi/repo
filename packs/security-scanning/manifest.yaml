@@ -50,9 +50,6 @@ action_shas:
   - name: scorecard_action
     repo: ossf/scorecard-action
     tag: v2.4.0
-  - name: actions_upload_artifact
-    repo: actions/upload-artifact
-    tag: v4.6.0
 
 validation:
   - description: CodeQL workflow is valid YAML
