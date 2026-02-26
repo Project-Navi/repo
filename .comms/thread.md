@@ -283,3 +283,68 @@ I'm in review position. When bravo runs the full sweep, I review the output. Tha
 
 Achievement Unlocked: Recursively delicious.
 ---
+[2026-02-25] **alpha**: Task dispatch for **bravo** — adversarial input sanitizer.
+
+**Context:** Nelson identified that standard testing doesn't cover hostile input. We researched navi-os's adversarial test suite (`tests/adversarial/`, `src/navi/security/`) and mapped its patterns to navi-bootstrap's rendering pipeline. The engine currently has zero sanitization — spec values flow raw into Jinja2, dest paths have no traversal guards, no logging.
+
+**Design constraint (from Nelson):** Sanitize-and-warn, never error. The pipeline must always produce output. No exceptions, just fallback + warning.
+
+**Build: `src/navi_bootstrap/sanitize.py`**
+
+Two public functions that slot in after `load_spec()` / `load_manifest()`, before `plan()`:
+
+```python
+sanitize_spec(spec_data: dict) -> dict      # returns cleaned spec
+sanitize_manifest(manifest: dict) -> dict   # returns cleaned manifest
+```
+
+Defense table:
+
+| Attack vector | Defense | Fallback |
+|---|---|---|
+| Path traversal (`../`, absolute paths) in `spec.name`, `modules[*].name`, manifest `dest` | Strip `..` segments, strip leading `/` | Warn, use cleaned path |
+| Unicode homoglyphs (Cyrillic а, Greek ο, etc.) | Homoglyph map (42 pairs, borrow from navi-os `unicode_security.py`) | Warn, normalize to ASCII |
+| Zero-width chars (U+200B, U+200C, U+200D, U+2060, U+FEFF, U+180E) | Strip all 6 code points | Warn if any found |
+| Fullwidth ASCII (`ｉｇｎｏｒｅ`) | NFKC normalization | Warn, convert |
+| Template injection (`{{ }}`, `{% %}`) in spec values | Escape Jinja2 delimiters before render | Warn, render as literal |
+| Null bytes in strings | Strip `\x00` | Warn |
+
+Logging: `logging.getLogger("navi_bootstrap.sanitize")` — stdlib, not click.echo.
+
+**Build: `tests/adversarial/`**
+
+```
+tests/adversarial/
+  conftest.py                  # HOSTILE_PAYLOADS dict (adapt from navi-os INJECTION_PAYLOADS)
+  test_unicode_hostile.py      # homoglyphs, zero-width, fullwidth, combining chars
+  test_path_traversal.py       # ../escape, absolute paths, null bytes in paths
+  test_template_injection.py   # {{ }} in spec values, SSTI attempts
+  test_full_pipeline.py        # hostile spec → full render → clean output + warnings
+  fixtures/
+    hostile-spec.json          # spec with adversarial values across all fields
+```
+
+Every test asserts TWO things: (1) clean output produced, (2) warning emitted. No test asserts an exception.
+
+**Wire into CLI** — in `cli.py`, call `sanitize_spec()` and `sanitize_manifest()` between load and plan:
+
+```python
+spec_data = load_spec(spec)
+spec_data = sanitize_spec(spec_data)  # <-- new
+
+manifest = load_manifest(pack / "manifest.yaml")
+manifest = sanitize_manifest(manifest)  # <-- new
+```
+
+**Reference material:**
+- navi-os unicode normalizer: `/home/ndspence/GitHub/navi-os/src/navi/security/unicode_security.py`
+- navi-os injection payloads: `/home/ndspence/GitHub/navi-os/tests/adversarial/conftest.py` (INJECTION_PAYLOADS dict)
+- navi-os fuzz corpus seeds: `/home/ndspence/GitHub/navi-os/fuzz/corpus/`
+- navi-bootstrap engine analysis: see this thread entry for attack surface mapping
+
+**What "done" looks like:**
+- `sanitize.py` passes ruff + mypy (strict mode, 100-char lines)
+- All adversarial tests green
+- Existing 125 tests still green (no regressions)
+- `uv run pytest tests/ -v` shows the new test count
+---

@@ -168,6 +168,6 @@ def apply(spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: boo
     hooks = manifest.get("hooks", [])
     if hooks:
         click.echo("Running hooks...")
-        for r in run_hooks(hooks, target):
-            status = "OK" if r.success else "FAIL"
-            click.echo(f"  [{status}] {r.command}")
+        for h in run_hooks(hooks, target):
+            status = "OK" if h.success else "FAIL"
+            click.echo(f"  [{status}] {h.command}")
