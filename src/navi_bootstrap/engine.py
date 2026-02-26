@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import jinja2
+import jinja2.sandbox
 
 
 @dataclass
@@ -74,8 +75,14 @@ def _eval_condition(condition_expr: str, spec: dict[str, Any]) -> bool:
 
 
 def _render_dest_path(dest_template: str, context: dict[str, Any]) -> str:
-    """Render Jinja2 expressions in destination paths."""
-    env = jinja2.Environment(undefined=jinja2.StrictUndefined)  # nosec B701
+    """Render Jinja2 expressions in destination paths.
+
+    Uses SandboxedEnvironment to prevent SSTI from hostile pack manifests.
+    Dest templates are pack-controlled input — sandboxing blocks dunder
+    attribute access (__class__, __mro__, __subclasses__) while allowing
+    normal variable interpolation.
+    """
+    env = jinja2.sandbox.SandboxedEnvironment(undefined=jinja2.StrictUndefined)
     tmpl = env.from_string(dest_template)
     return tmpl.render(**context)
 

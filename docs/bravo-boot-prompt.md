@@ -45,7 +45,7 @@ You are **bravo** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 - **Pack dependency order:** base first, then any elective in any order
 - **`nboot-spec.json`** in repo root — the self-bootstrap spec
 - **LM Studio gotcha**: supports `json_schema` but NOT `json_object`
-- **Devstral endpoint**: `http://100.72.243.82:1234/v1`, model: `devstral-small-2-24b-instruct-2512`
+- **Devstral endpoint**: set `GRIPPY_BASE_URL` in `.dev.vars` (gitignored). See `.dev.vars.example`. Model: `devstral-small-2-24b-instruct-2512`
 - **cli.py coordination:** alpha and bravo both edit this file. Post to thread when you touch it. Whoever lands first, the other rebases.
 
 ## Files you own / recently touched

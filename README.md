@@ -7,14 +7,17 @@ Spec-driven rendering engine and template packs for bootstrapping projects to pr
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ```bash
+# Generate a spec by inspecting your project
+nboot init --target ./my-project
+
+# Preview what a pack would change
+nboot diff --spec nboot-spec.json --pack ./packs/base --target ./my-project
+
 # Apply packs to an existing project
-nboot apply --spec project.json --pack ./packs/base --target ./my-project
+nboot apply --spec nboot-spec.json --pack ./packs/base --target ./my-project
 
 # Render a new project from scratch
-nboot render --spec project.json --pack ./packs/base --out ./my-project
-
-# Validate a spec without rendering
-nboot validate --spec project.json --pack ./packs/base
+nboot render --spec nboot-spec.json --pack ./packs/base --out ./my-project
 ```
 
 ## Quick Start
@@ -23,11 +26,14 @@ nboot validate --spec project.json --pack ./packs/base
 # Install
 uv sync
 
-# Apply the base pack to your project
-nboot apply --spec my-spec.json --pack ./packs/base --target /path/to/project
+# Inspect your project and generate a spec
+nboot init --target /path/to/project
 
-# Dry run first if you want to see what changes
-nboot apply --spec my-spec.json --pack ./packs/base --target /path/to/project --dry-run
+# Preview changes before applying
+nboot diff --spec nboot-spec.json --pack ./packs/base --target /path/to/project
+
+# Apply the base pack to your project
+nboot apply --spec nboot-spec.json --pack ./packs/base --target /path/to/project
 ```
 
 The spec describes your project. The pack describes what to generate. The engine connects them deterministically: same spec + same pack = same output, every time.
@@ -103,24 +109,27 @@ spec.json + pack/
 
 Stages 0-3 are pure functions — spec and pack in, rendered files out, no side effects. This is by design: a future TypeScript rewrite runs stages 0-3 on Cloudflare Workers, with an ultra-lightweight local client handling stages 4-5.
 
-The engine is ~600 lines across 7 modules. All project-specific opinions live in the spec and the template pack, never in the engine.
+The engine is ~800 lines across 10 modules. All project-specific opinions live in the spec and the template pack, never in the engine.
 
 ```
 src/navi_bootstrap/
-├── cli.py        # Click CLI: init, render, apply, validate
-├── engine.py     # Plan + Render (stages 2-3)
+├── cli.py        # Click CLI: init, render, apply, diff, validate
+├── engine.py     # Plan + Render (stages 2-3), sandboxed dest paths
 ├── manifest.py   # Manifest loading + validation
 ├── spec.py       # Spec loading + JSON Schema validation
 ├── resolve.py    # Stage 0: action SHA resolution
 ├── validate.py   # Stage 4: post-render validation
-└── hooks.py      # Stage 5: hook runner
+├── hooks.py      # Stage 5: hook runner
+├── sanitize.py   # Input sanitization (homoglyphs, traversal, injection)
+├── init.py       # Project inspection → spec generation
+└── diff.py       # Drift detection (render-to-memory + unified diff)
 ```
 
 ## Development
 
 ```bash
 uv sync                                          # Install dependencies
-uv run pytest tests/ -v                          # Run tests (162 passing)
+uv run pytest tests/ -v                          # Run tests
 uv run ruff check src/navi_bootstrap/ tests/     # Lint
 uv run ruff format src/navi_bootstrap/ tests/    # Format
 uv run mypy src/navi_bootstrap/                  # Type check

@@ -11,6 +11,7 @@ version: "0.1.0"
 conditions:
   "workflows/tests.yml.j2": "spec.features.ci"
   "pre-commit-config.yaml.j2": "spec.features.pre_commit"
+  "secrets-baseline.json.j2": "spec.features.pre_commit"
   "pyproject-tools.toml.j2": "!spec.recon.existing_tools.ruff"
 
 loops: {}
@@ -29,6 +30,8 @@ templates:
     dest: CLAUDE.md
   - src: DEBT.md.j2
     dest: DEBT.md
+  - src: secrets-baseline.json.j2
+    dest: .secrets.baseline
 
 strip_suffix: ".j2"
 

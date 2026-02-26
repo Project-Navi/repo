@@ -3,8 +3,9 @@
 Usage:
     uv run python -m grippy.validate_q4 \
         --prompts-dir /path/to/grumpy \
-        --base-url http://100.72.243.82:1234/v1
+        --base-url $GRIPPY_BASE_URL
 
+Set GRIPPY_BASE_URL in .dev.vars (gitignored) or pass --base-url explicitly.
 This is step 4 of the navi-bootstrap validation plan:
   engine correctness + Devstral reliability for local Grippy.
 """
@@ -12,12 +13,22 @@ This is step 4 of the navi-bootstrap validation plan:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.schema import GrippyReview
+
+# Load .dev.vars if present (simple KEY=VALUE, no shell expansion)
+_DEV_VARS_PATH = Path(__file__).resolve().parent.parent.parent / ".dev.vars"
+if _DEV_VARS_PATH.is_file():
+    for line in _DEV_VARS_PATH.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 def get_self_bootstrap_diff() -> str:
@@ -43,13 +54,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--base-url",
-        default="http://100.72.243.82:1234/v1",
-        help="Devstral API endpoint",
+        default=os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1"),
+        help="Devstral API endpoint (default: $GRIPPY_BASE_URL or localhost:1234)",
     )
     parser.add_argument(
         "--model-id",
-        default="devstral-small-2-24b-instruct-2512",
-        help="Model identifier",
+        default=os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512"),
+        help="Model identifier (default: $GRIPPY_MODEL_ID or devstral-small-2-24b-instruct-2512)",
     )
     args = parser.parse_args()
 

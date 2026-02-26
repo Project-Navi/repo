@@ -47,7 +47,7 @@ You are **alpha** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 
 ## Key context
 
-- **Devstral endpoint**: `http://100.72.243.82:1234/v1`, model: `devstral-small-2-24b-instruct-2512` (Q4)
+- **Devstral endpoint**: set `GRIPPY_BASE_URL` in `.dev.vars` (gitignored). See `.dev.vars.example`. Model: `devstral-small-2-24b-instruct-2512` (Q4)
 - **Grippy files**: `/home/ndspence/Downloads/grumpy/` (21 markdown files)
 - **LM Studio gotcha**: supports `json_schema` response_format but NOT `json_object` — don't use `use_json_mode=True` in Agno
 - **"Recursively delicious"**: wired into review-system pack under `grudging_respect`. Trigger: closed loop that holds cleanly.
