@@ -458,7 +458,6 @@ def main() -> None:
             graph_db_path=data_dir / "grippy-graph.db",
             lance_dir=data_dir / "lance",
             embed_fn=embed_fn,
-            embed_dim=0,
         )
         store.store_review(graph)
         print(f"  Graph: {len(graph.nodes)} nodes persisted")

@@ -72,12 +72,10 @@ class GrippyStore:
         graph_db_path: Path | str,
         lance_dir: Path | str,
         embed_fn: EmbedFn,
-        embed_dim: int,
     ) -> None:
         self._graph_db_path = Path(graph_db_path)
         self._lance_dir = Path(lance_dir)
         self._embed_fn = embed_fn
-        self._embed_dim = embed_dim
 
         # Init SQLite
         self._graph_db_path.parent.mkdir(parents=True, exist_ok=True)
