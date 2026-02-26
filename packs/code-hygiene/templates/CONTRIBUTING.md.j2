@@ -1,0 +1,80 @@
+# Contributing to {{ spec.name }}
+
+Thank you for your interest in contributing! This document provides guidelines and conventions for contributing to the project.
+
+## Development Setup
+
+```bash
+# Clone the repository
+git clone <repo-url>
+cd {{ spec.name }}
+
+# Install dependencies
+uv sync
+
+# Run tests
+uv run pytest {{ spec.structure.test_dir | default("tests") }}/ -v
+
+# Run linters
+uv run ruff check {{ spec.structure.src_dir | default("src") }}/ {{ spec.structure.test_dir | default("tests") }}/
+uv run ruff format --check {{ spec.structure.src_dir | default("src") }}/ {{ spec.structure.test_dir | default("tests") }}/
+```
+
+## Code Quality Standards
+
+### Formatting & Linting
+
+- **Formatter**: ruff format (line length: 100)
+- **Linter**: ruff check
+- **Type checking**: mypy (strict mode)
+- Run all checks before submitting: `uv run ruff format --check . && uv run ruff check . && uv run mypy {{ spec.structure.src_dir | default("src") }}/`
+
+### Testing
+
+- All new code must have tests
+- Tests live in `{{ spec.structure.test_dir | default("tests") }}/`
+- Run with: `uv run pytest {{ spec.structure.test_dir | default("tests") }}/ -v`
+- Aim for meaningful coverage, not 100% line coverage
+
+### Code Style
+
+- Use type hints on all public functions and methods
+- Keep functions focused — one responsibility per function
+- Prefer explicit over implicit
+- Document non-obvious behavior with comments (not obvious code)
+- Avoid premature abstraction — three similar lines is better than a premature helper
+
+### Commit Conventions
+
+- Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`
+- Keep commits atomic — one logical change per commit
+- Write commit messages that explain *why*, not just *what*
+
+## Pull Request Process
+
+1. Create a feature branch from `main`
+2. Make your changes with tests
+3. Run the full quality check suite
+4. Submit a PR with a clear description
+5. Address review feedback
+
+### PR Checklist
+
+- [ ] Code follows the project style guidelines
+- [ ] Tests added for new functionality
+- [ ] All existing tests pass
+- [ ] Linting and type checking pass
+- [ ] Documentation updated if needed
+
+## Reporting Issues
+
+- Search existing issues before creating a new one
+- Use the issue templates when available
+- Include reproduction steps for bugs
+- Be specific about expected vs actual behavior
+
+## Scope Guidelines
+
+- Do not modify files outside `{{ spec.structure.src_dir | default("src") }}/` and `{{ spec.structure.test_dir | default("tests") }}/` without discussion
+- Do not bump dependency version constraints without discussion
+- Document pre-existing violations rather than fixing them silently
