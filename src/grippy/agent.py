@@ -16,6 +16,9 @@ from grippy.schema import GrippyReview
 DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompts_data"
 
 
+_VALID_TRANSPORTS = {"openai", "local"}
+
+
 def _resolve_transport(
     transport: str | None,
     model_id: str,
@@ -29,25 +32,46 @@ def _resolve_transport(
 
     Returns:
         (transport, source) — e.g. ("openai", "param") or ("local", "env:GRIPPY_TRANSPORT").
+
+    Raises:
+        ValueError: If transport value is not "openai" or "local".
     """
+    resolved: str | None = None
+    source = "default"
+
     # Tier 1: explicit parameter
     if transport is not None:
-        return transport, "param"
+        resolved = transport.strip().lower()
+        source = "param"
 
     # Tier 2: environment variable
-    env_transport = os.environ.get("GRIPPY_TRANSPORT")
-    if env_transport:
-        return env_transport, "env:GRIPPY_TRANSPORT"
+    if resolved is None:
+        env_transport = os.environ.get("GRIPPY_TRANSPORT")
+        if env_transport:
+            resolved = env_transport.strip().lower()
+            source = "env:GRIPPY_TRANSPORT"
 
     # Tier 3: infer from OPENAI_API_KEY
-    if os.environ.get("OPENAI_API_KEY"):
-        print(
-            f"::notice::Grippy transport inferred from OPENAI_API_KEY. "
-            f"Set GRIPPY_TRANSPORT=openai to make this explicit. model={model_id}"
-        )
-        return "openai", "inferred:OPENAI_API_KEY"
+    if resolved is None:
+        if os.environ.get("OPENAI_API_KEY"):
+            print(
+                f"::notice::Grippy transport inferred from OPENAI_API_KEY. "
+                f"Set GRIPPY_TRANSPORT=openai to make this explicit. model={model_id}"
+            )
+            resolved = "openai"
+            source = "inferred:OPENAI_API_KEY"
+        else:
+            resolved = "local"
 
-    return "local", "default"
+    # Validate
+    if resolved not in _VALID_TRANSPORTS:
+        msg = (
+            f"Invalid GRIPPY_TRANSPORT={resolved!r} (source: {source}). "
+            f"Must be one of: {', '.join(sorted(_VALID_TRANSPORTS))}"
+        )
+        raise ValueError(msg)
+
+    return resolved, source
 
 
 def create_reviewer(
@@ -70,10 +94,11 @@ def create_reviewer(
         model_id: Model identifier at the inference endpoint.
         base_url: OpenAI-compatible API base URL (ignored when transport="openai").
         api_key: API key (LM Studio accepts any non-empty string).
-        transport: "openai" uses OpenAIChat (reads OPENAI_API_KEY from env),
-            anything else uses OpenAILike with explicit base_url/api_key.
-            If None, resolved via GRIPPY_TRANSPORT env var or inferred from
-            OPENAI_API_KEY presence.
+        transport: "openai" or "local". "openai" uses OpenAIChat (reads
+            OPENAI_API_KEY from env), "local" uses OpenAILike with explicit
+            base_url/api_key. If None, resolved via GRIPPY_TRANSPORT env var
+            or inferred from OPENAI_API_KEY presence. Invalid values raise
+            ValueError.
         prompts_dir: Directory containing Grippy's 21 markdown prompt files.
         mode: Review mode — pr_review, security_audit, governance_check, surprise_audit.
         db_path: Path to SQLite file for session persistence. None = stateless.

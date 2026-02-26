@@ -7,4 +7,5 @@ before the -m mechanism executes it as __main__.
 
 from grippy.review import main
 
-main()
+if __name__ == "__main__":
+    main()

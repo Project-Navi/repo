@@ -507,10 +507,30 @@ class TestMakeEmbedFn:
             fn(["hello"])
 
     @patch("requests.post")
-    def test_openai_api_key_auth(
+    def test_openai_key_sent_to_openai_host(
         self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OPENAI_API_KEY is used for Authorization header."""
+        """OPENAI_API_KEY is sent when endpoint is api.openai.com."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer sk-openai-test"
+
+    @patch("requests.post")
+    def test_openai_key_not_sent_to_non_openai_host(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OPENAI_API_KEY is NOT sent to non-OpenAI endpoints."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
         monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
         mock_resp = MagicMock()
@@ -524,13 +544,13 @@ class TestMakeEmbedFn:
         fn(["hello"])
 
         headers = mock_post.call_args[1].get("headers", {})
-        assert headers.get("Authorization") == "Bearer sk-openai-test"
+        assert "Authorization" not in headers
 
     @patch("requests.post")
-    def test_grippy_api_key_fallback(
+    def test_grippy_api_key_sent_to_any_host(
         self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """GRIPPY_API_KEY is used when OPENAI_API_KEY is not set."""
+        """GRIPPY_API_KEY is used for any endpoint."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("GRIPPY_API_KEY", "grippy-secret")
         mock_resp = MagicMock()
@@ -567,10 +587,10 @@ class TestMakeEmbedFn:
         assert "Authorization" not in headers
 
     @patch("requests.post")
-    def test_openai_key_precedence_over_grippy_key(
+    def test_openai_key_precedence_on_openai_host(
         self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OPENAI_API_KEY takes precedence over GRIPPY_API_KEY."""
+        """OPENAI_API_KEY takes precedence over GRIPPY_API_KEY on OpenAI host."""
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
         monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
         mock_resp = MagicMock()
@@ -580,11 +600,31 @@ class TestMakeEmbedFn:
 
         from grippy.review import make_embed_fn
 
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
         fn(["hello"])
 
         headers = mock_post.call_args[1].get("headers", {})
         assert headers.get("Authorization") == "Bearer sk-openai"
+
+    @patch("requests.post")
+    def test_non_openai_host_with_both_keys_uses_grippy(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-OpenAI host with both keys uses GRIPPY_API_KEY, not OPENAI_API_KEY."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.5]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer grippy-key"
 
 
 # --- T1: main() uses run_review + review_to_graph + GrippyStore ---

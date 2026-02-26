@@ -141,7 +141,23 @@ def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[
     def embed(texts: list[str]) -> list[list[float]]:
         url = f"{base_url}/embeddings"
         headers: dict[str, str] = {}
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GRIPPY_API_KEY") or ""
+        # Only send OPENAI_API_KEY to OpenAI hosts; use GRIPPY_API_KEY for others
+        is_openai_host = "api.openai.com" in base_url
+        openai_key = os.environ.get("OPENAI_API_KEY") or ""
+        grippy_key = os.environ.get("GRIPPY_API_KEY") or ""
+        if is_openai_host and openai_key:
+            api_key = openai_key
+        elif grippy_key:
+            api_key = grippy_key
+        elif not is_openai_host and openai_key:
+            # Don't leak OPENAI_API_KEY to non-OpenAI endpoints
+            print(
+                f"::warning::OPENAI_API_KEY present but embedding endpoint is {base_url}. "
+                f"Set GRIPPY_API_KEY for non-OpenAI endpoints. Sending unauthenticated."
+            )
+            api_key = ""
+        else:
+            api_key = ""
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         response = requests.post(

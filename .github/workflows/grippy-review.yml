@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: 'Runner to use (ubuntu-latest or self-hosted)'
+        description: 'Runner to use'
         required: false
         default: 'ubuntu-latest'
         type: choice
@@ -21,6 +21,8 @@ permissions:
 jobs:
   review:
     name: Grippy Code Review
+    # PR events always run on ubuntu-latest (cloud).
+    # Self-hosted runner (LM Studio over Tailscale) is workflow_dispatch only.
     runs-on: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
 
     steps:
@@ -36,7 +38,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ./grippy-data
-          key: grippy-data-${{ github.repository }}
+          key: grippy-data-${{ github.sha }}
           restore-keys: |
             grippy-data-
 

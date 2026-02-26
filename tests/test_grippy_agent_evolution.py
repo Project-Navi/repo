@@ -201,3 +201,32 @@ class TestTransportSelection:
         transport, source = _resolve_transport(None, "test-model")
         assert transport == "local"
         assert source == "default"
+
+    def test_invalid_transport_raises(self) -> None:
+        """Invalid transport value raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid GRIPPY_TRANSPORT"):
+            _resolve_transport("cloud", "test-model")
+
+    def test_typo_transport_raises(self) -> None:
+        """Common typos are caught and rejected."""
+        for typo in ("open-ai", "remote", "gcp", "aws"):
+            with pytest.raises(ValueError, match="Invalid GRIPPY_TRANSPORT"):
+                _resolve_transport(typo, "test-model")
+
+    def test_transport_normalized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Transport values are normalized (strip + lowercase)."""
+        transport, _ = _resolve_transport("  OPENAI  ", "test-model")
+        assert transport == "openai"
+
+    def test_env_transport_normalized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GRIPPY_TRANSPORT env var is normalized."""
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "  Local  ")
+        transport, source = _resolve_transport(None, "test-model")
+        assert transport == "local"
+        assert source == "env:GRIPPY_TRANSPORT"
+
+    def test_invalid_env_transport_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Invalid GRIPPY_TRANSPORT env var raises ValueError."""
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "gcp")
+        with pytest.raises(ValueError, match="Invalid GRIPPY_TRANSPORT"):
+            _resolve_transport(None, "test-model")
