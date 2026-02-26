@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from grippy.review import (
-    COMMENT_MARKER,
+    COMMENT_MARKER_PREFIX,
     MAX_DIFF_CHARS,
     _with_timeout,
     fetch_pr_diff,
@@ -395,36 +395,66 @@ class TestFetchPrDiffForkHandling:
         assert "55" in call_url
 
 
-# --- post_comment: new comment per review round ---
+# --- post_comment: SHA-scoped upsert ---
 
 
 class TestPostComment:
     @patch("github.Github")
-    def test_creates_new_comment(self, mock_gh_cls: MagicMock) -> None:
-        """Each review round creates a new comment."""
+    def test_creates_new_comment_for_new_sha(self, mock_gh_cls: MagicMock) -> None:
+        """New SHA creates a new comment."""
         mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = []
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
-        post_comment("token", "org/repo", 42, f"Review body\n{COMMENT_MARKER}")
+        post_comment("token", "org/repo", 42, "Review body", head_sha="abc123")
 
         mock_pr.create_issue_comment.assert_called_once()
 
     @patch("github.Github")
-    def test_does_not_edit_existing_comments(self, mock_gh_cls: MagicMock) -> None:
-        """Re-run creates a new comment, does not edit old ones."""
+    def test_edits_existing_comment_for_same_sha(self, mock_gh_cls: MagicMock) -> None:
+        """Re-run on same SHA edits the existing comment."""
         existing_comment = MagicMock()
-        existing_comment.body = f"Old review\n{COMMENT_MARKER}"
+        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
+        mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = [existing_comment]
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, "New review", head_sha="abc123")
+
+        existing_comment.edit.assert_called_once_with("New review")
+        mock_pr.create_issue_comment.assert_not_called()
+
+    @patch("github.Github")
+    def test_new_comment_for_different_sha(self, mock_gh_cls: MagicMock) -> None:
+        """Different SHA creates new comment even if old review exists."""
+        existing_comment = MagicMock()
+        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
+        mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = [existing_comment]
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, "New review", head_sha="def456")
+
+        mock_pr.create_issue_comment.assert_called_once()
+        existing_comment.edit.assert_not_called()
+
+    @patch("github.Github")
+    def test_no_sha_always_creates_new(self, mock_gh_cls: MagicMock) -> None:
+        """Without head_sha, always creates a new comment (error comments)."""
         mock_pr = MagicMock()
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
-        post_comment("token", "org/repo", 42, f"New review\n{COMMENT_MARKER}")
+        post_comment("token", "org/repo", 42, "Error comment")
 
         mock_pr.create_issue_comment.assert_called_once()
-        existing_comment.edit.assert_not_called()
 
 
 # --- T2: make_embed_fn ---

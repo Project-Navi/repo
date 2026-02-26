@@ -32,8 +32,9 @@ from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.schema import GrippyReview
 
-# Marker embedded in every Grippy comment — used for upsert (C2 fix)
-COMMENT_MARKER = "<!-- grippy-review -->"
+# Marker prefix embedded in every Grippy comment — SHA-scoped for upsert
+COMMENT_MARKER_PREFIX = "<!-- grippy-review-"
+COMMENT_MARKER_SUFFIX = " -->"
 
 # Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
 MAX_DIFF_CHARS = 200_000
@@ -43,7 +44,7 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
     """Parse GitHub Actions pull_request event payload.
 
     Returns:
-        Dict with keys: pr_number, repo, title, author, head_ref, base_ref, description.
+        Dict with keys: pr_number, repo, title, author, head_ref, head_sha, base_ref, description.
 
     Raises:
         FileNotFoundError: If event_path doesn't exist.
@@ -57,6 +58,7 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
         "title": pr["title"],
         "author": pr["user"]["login"],
         "head_ref": pr["head"]["ref"],
+        "head_sha": pr["head"].get("sha", ""),
         "base_ref": pr["base"]["ref"],
         "description": pr.get("body") or "",
     }
@@ -183,7 +185,12 @@ def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[
     return embed
 
 
-def format_review_comment(review: GrippyReview) -> str:
+def _make_comment_marker(head_sha: str) -> str:
+    """Build a SHA-scoped hidden marker for comment upsert."""
+    return f"{COMMENT_MARKER_PREFIX}{head_sha}{COMMENT_MARKER_SUFFIX}"
+
+
+def format_review_comment(review: GrippyReview, *, head_sha: str = "") -> str:
     """Format GrippyReview as a markdown PR comment."""
     lines: list[str] = []
 
@@ -258,9 +265,9 @@ def format_review_comment(review: GrippyReview) -> str:
         f"Complexity: {review.pr.complexity_tier.value}</sub>"
     )
 
-    # Hidden marker for upsert detection
+    # Hidden marker — SHA-scoped for upsert within same commit
     lines.append("")
-    lines.append(COMMENT_MARKER)
+    lines.append(_make_comment_marker(head_sha))
 
     return "\n".join(lines)
 
@@ -283,17 +290,26 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     return response.text
 
 
-def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
-    """Post a new Grippy review comment on a PR.
+def post_comment(token: str, repo: str, pr_number: int, body: str, *, head_sha: str = "") -> None:
+    """Post or update a Grippy review comment on a PR.
 
-    Each review round gets its own comment so the review history is
-    visible in the PR timeline.
+    Upsert strategy: if a comment with the same SHA marker exists (re-run
+    on the same commit), edit it. Otherwise create a new comment so each
+    push gets its own review in the timeline.
     """
     from github import Github
 
     gh = Github(token)
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
+
+    if head_sha:
+        marker = _make_comment_marker(head_sha)
+        for comment in pr.get_issue_comments():
+            if marker in comment.body:
+                comment.edit(body)
+                return
+
     pr.create_issue_comment(body)
 
 
@@ -373,7 +389,7 @@ def main() -> None:
             failure_body = (
                 f"## \u274c Grippy Review \u2014 DIFF FETCH ERROR\n\n"
                 f"Could not fetch PR diff: `{exc}`\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -425,7 +441,7 @@ def main() -> None:
                 f"## ❌ Grippy Review — PARSE ERROR\n\n"
                 f"Failed after {exc.attempts} attempts.\n\n"
                 f"```\n{raw_preview}\n```\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -438,7 +454,7 @@ def main() -> None:
                 f"## \u274c Grippy Review \u2014 TIMEOUT\n\n"
                 f"Review timed out after {timeout_seconds}s.\n\n"
                 f"Model: {model_id} at {base_url}\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -451,7 +467,7 @@ def main() -> None:
                 f"## ❌ Grippy Review — ERROR\n\n"
                 f"Review agent failed: `{exc}`\n\n"
                 f"Model: {model_id} at {base_url}\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -477,9 +493,10 @@ def main() -> None:
         print(f"::warning::Graph persistence failed: {exc}")
 
     # 6. Format and post comment
-    comment = format_review_comment(review)
+    head_sha = pr_event.get("head_sha", "")
+    comment = format_review_comment(review, head_sha=head_sha)
     print("Posting review comment...")
-    post_comment(token, pr_event["repo"], pr_event["pr_number"], comment)
+    post_comment(token, pr_event["repo"], pr_event["pr_number"], comment, head_sha=head_sha)
     print("  Done.")
 
     # 7. Set outputs for GitHub Actions

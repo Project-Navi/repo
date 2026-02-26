@@ -13,7 +13,6 @@ from grippy.graph import (
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.review import (
-    COMMENT_MARKER,
     format_review_comment,
     load_pr_event,
     parse_review_response,
@@ -22,7 +21,6 @@ from grippy.review import (
 from grippy.schema import GrippyReview
 
 __all__ = [
-    "COMMENT_MARKER",
     "Edge",
     "EdgeType",
     "GrippyReview",
