@@ -1,0 +1,81 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-{% raw %}${{ github.head_ref || github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        python-version: {{ spec.recon.python_test_versions | default(["3.12"]) | tojson }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - name: Set up Python
+        uses: actions/setup-python@{{ action_shas.actions_setup_python }}  # {{ action_versions.actions_setup_python }}
+        with:
+          python-version: {% raw %}${{ matrix.python-version }}{% endraw %}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest {{ spec.structure.test_dir | default("tests") }}/ -v --cov={{ spec.structure.src_dir }} --cov-report=term-missing
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - name: Set up Python
+        uses: actions/setup-python@{{ action_shas.actions_setup_python }}  # {{ action_versions.actions_setup_python }}
+        with:
+          python-version: "{{ spec.python_version }}"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check {{ spec.structure.src_dir }}/ {{ spec.structure.test_dir | default("tests") }}/
+
+      - name: Format check
+        run: uv run ruff format --check {{ spec.structure.src_dir }}/ {{ spec.structure.test_dir | default("tests") }}/
+
+      - name: Security scan
+        run: uv run bandit -r {{ spec.structure.src_dir }} -ll
+
+      - name: Type check
+        run: uv run mypy {{ spec.structure.src_dir }}/ --ignore-missing-imports
