@@ -15,6 +15,8 @@ templates:
     dest: .github/instructions/workflows.instructions.md
   - src: instructions/security.instructions.md.j2
     dest: .github/instructions/security.instructions.md
+  - src: grippy.yaml.j2
+    dest: .grippy.yaml
 
 strip_suffix: ".j2"
 hooks: []
