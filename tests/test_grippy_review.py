@@ -445,6 +445,265 @@ class TestPostComment:
         other_comment.edit.assert_not_called()
 
 
+# --- T2: make_embed_fn ---
+
+
+class TestMakeEmbedFn:
+    """Tests for make_embed_fn — LM Studio /v1/embeddings wrapper."""
+
+    @patch("requests.post")
+    def test_calls_embeddings_endpoint(self, mock_post: MagicMock) -> None:
+        """embed_fn hits /v1/embeddings with correct model and input."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        result = fn(["hello world"])
+
+        assert result == [[0.1, 0.2, 0.3]]
+        mock_post.assert_called_once()
+        call_json = mock_post.call_args[1]["json"]
+        assert call_json["model"] == "test-model"
+        assert call_json["input"] == ["hello world"]
+
+    @patch("requests.post")
+    def test_batch_embedding(self, mock_post: MagicMock) -> None:
+        """embed_fn handles multiple texts in one call."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "data": [
+                {"embedding": [0.1, 0.2]},
+                {"embedding": [0.3, 0.4]},
+            ]
+        }
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        result = fn(["text1", "text2"])
+
+        assert len(result) == 2
+        assert result[0] == [0.1, 0.2]
+        assert result[1] == [0.3, 0.4]
+
+    @patch("requests.post")
+    def test_http_error_propagates(self, mock_post: MagicMock) -> None:
+        """HTTP errors from embedding endpoint propagate."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = Exception("503 Service Unavailable")
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        with pytest.raises(Exception, match="503"):
+            fn(["hello"])
+
+
+# --- T1: main() uses run_review + review_to_graph + GrippyStore ---
+
+
+class TestMainWiringNewAPI:
+    """Verify main() calls run_review instead of agent.run, and pipes through graph + persistence."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 1,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_main_calls_run_review_not_agent_run(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """main() should call run_review(agent, message), not agent.run(message)."""
+        event_path = self._make_event_file(tmp_path)
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review()
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+
+        from grippy.review import main
+
+        main()
+
+        mock_run_review.assert_called_once()
+        mock_create.return_value.run.assert_not_called()
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_main_calls_review_to_graph(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """main() should transform review into a graph."""
+        event_path = self._make_event_file(tmp_path)
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review()
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+
+        from grippy.review import main
+
+        main()
+
+        mock_to_graph.assert_called_once_with(review)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_main_persists_graph(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """main() should persist the review graph via GrippyStore."""
+        event_path = self._make_event_file(tmp_path)
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        graph = MagicMock(nodes=[])
+        mock_to_graph.return_value = graph
+
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+
+        from grippy.review import main
+
+        main()
+
+        mock_store_cls.assert_called_once()
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_persistence_failure_non_fatal(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Persistence failure should not prevent the review comment from posting."""
+        event_path = self._make_event_file(tmp_path)
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_store_cls.return_value.store_review.side_effect = RuntimeError("LanceDB exploded")
+
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+
+        from grippy.review import main
+
+        # Should NOT raise — persistence failure is non-fatal
+        main()
+
+        # Comment should still be posted
+        mock_post.assert_called_once()
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_review_parse_error_posts_failure_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ReviewParseError posts parse error comment and exits 1."""
+        from grippy.retry import ReviewParseError
+
+        event_path = self._make_event_file(tmp_path)
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.side_effect = ReviewParseError(
+            attempts=3, last_raw="garbage", errors=["bad json"]
+        )
+
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        mock_post.assert_called_once()
+        assert "PARSE" in mock_post.call_args[0][3]
+
+
 # --- H2: diff size cap ---
 
 

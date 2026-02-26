@@ -4,11 +4,14 @@ Usage (GitHub Actions):
     python -m grippy.review
 
 Environment variables:
-    GITHUB_TOKEN        — GitHub API token for fetching diff and posting comments
-    GITHUB_EVENT_PATH   — path to PR event JSON (set by GitHub Actions)
-    GRIPPY_BASE_URL     — LM Studio / OpenAI-compatible endpoint
-    GRIPPY_MODEL_ID     — model identifier at the endpoint
-    GITHUB_REPOSITORY   — owner/repo (set by GitHub Actions, fallback)
+    GITHUB_TOKEN            — GitHub API token for fetching diff and posting comments
+    GITHUB_EVENT_PATH       — path to PR event JSON (set by GitHub Actions)
+    GRIPPY_BASE_URL         — LM Studio / OpenAI-compatible endpoint
+    GRIPPY_MODEL_ID         — model identifier at the endpoint
+    GRIPPY_EMBEDDING_MODEL  — embedding model name at the same endpoint
+    GRIPPY_DATA_DIR         — persistent directory for graph DB + LanceDB
+    GRIPPY_TIMEOUT          — seconds before review is killed (0 = no timeout)
+    GITHUB_REPOSITORY       — owner/repo (set by GitHub Actions, fallback)
 """
 
 from __future__ import annotations
@@ -16,9 +19,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from grippy.agent import create_reviewer, format_pr_context
+from grippy.graph import review_to_graph
+from grippy.persistence import GrippyStore
+from grippy.retry import ReviewParseError, run_review
 from grippy.schema import GrippyReview
 
 # Marker embedded in every Grippy comment — used for upsert (C2 fix)
@@ -115,6 +123,34 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
     return result
 
 
+def make_embed_fn(
+    base_url: str, model: str
+) -> Callable[[list[str]], list[list[float]]]:
+    """Create batch embedding function that calls LM Studio /v1/embeddings.
+
+    Args:
+        base_url: OpenAI-compatible API base URL (e.g. http://localhost:1234/v1).
+        model: Embedding model name (e.g. text-embedding-qwen3-embedding-4b).
+
+    Returns:
+        Callable that takes list[str] and returns list[list[float]].
+    """
+    import requests  # type: ignore[import-untyped]
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        url = f"{base_url}/embeddings"
+        response = requests.post(
+            url,
+            json={"model": model, "input": texts},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()["data"]
+        return [item["embedding"] for item in data]
+
+    return embed
+
+
 def format_review_comment(review: GrippyReview) -> str:
     """Format GrippyReview as a markdown PR comment."""
     lines: list[str] = []
@@ -203,7 +239,7 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     Uses Accept: application/vnd.github.v3.diff to get the full unified
     diff in a single request — no pagination issues (C1 fix).
     """
-    import requests  # type: ignore[import-untyped]
+    import requests
 
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
     headers = {
@@ -306,12 +342,19 @@ def main() -> None:
         print(f"  Diff truncated to {MAX_DIFF_CHARS} chars")
 
     # 3. Create agent and format context
-    from grippy.agent import create_reviewer, format_pr_context
+    data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
+    embedding_model = os.environ.get(
+        "GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b"
+    )
+    data_dir = Path(data_dir_str)
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     agent = create_reviewer(
         model_id=model_id,
         base_url=base_url,
         mode=mode,
+        db_path=data_dir / "grippy-session.db",
+        session_id=f"pr-{pr_event['pr_number']}",
     )
 
     user_message = format_pr_context(
@@ -322,13 +365,26 @@ def main() -> None:
         diff=diff,
     )
 
-    # 4. Run review (H1: error handling around LLM call)
+    # 4. Run review with retry + validation (replaces agent.run + parse_review_response)
     print(f"Running review (model={model_id}, endpoint={base_url})...")
     try:
-        run_output = agent.run(user_message)
+        review = run_review(agent, user_message)
+    except ReviewParseError as exc:
+        print(f"::error::Grippy review failed after {exc.attempts} attempts: {exc}")
+        raw_preview = exc.last_raw[:500]
+        try:
+            failure_body = (
+                f"## ❌ Grippy Review — PARSE ERROR\n\n"
+                f"Failed after {exc.attempts} attempts.\n\n"
+                f"```\n{raw_preview}\n```\n\n"
+                f"{COMMENT_MARKER}"
+            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
+        except Exception:
+            pass
+        sys.exit(1)
     except Exception as exc:
         print(f"::error::Grippy agent failed: {exc}")
-        # Post a failure comment so the PR author knows
         try:
             failure_body = (
                 f"## ❌ Grippy Review — ERROR\n\n"
@@ -338,29 +394,27 @@ def main() -> None:
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
-            pass  # Don't mask the original error
-        sys.exit(1)
-
-    # 5. Parse response (H1: error handling around parse)
-    try:
-        review = parse_review_response(run_output.content)
-    except ValueError as exc:
-        print(f"::error::Failed to parse review response: {exc}")
-        raw_preview = str(run_output.content)[:500]
-        try:
-            failure_body = (
-                f"## ❌ Grippy Review — PARSE ERROR\n\n"
-                f"Could not parse LLM response as GrippyReview.\n\n"
-                f"```\n{raw_preview}\n```\n\n"
-                f"{COMMENT_MARKER}"
-            )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
-        except Exception:
             pass
         sys.exit(1)
 
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
+
+    # 5. Build graph and persist (non-fatal — review still gets posted on failure)
+    print("Persisting review graph...")
+    try:
+        embed_fn = make_embed_fn(base_url, embedding_model)
+        graph = review_to_graph(review)
+        store = GrippyStore(
+            graph_db_path=data_dir / "grippy-graph.db",
+            lance_dir=data_dir / "lance",
+            embed_fn=embed_fn,
+            embed_dim=0,
+        )
+        store.store_review(graph)
+        print(f"  Graph: {len(graph.nodes)} nodes persisted")
+    except Exception as exc:
+        print(f"::warning::Graph persistence failed: {exc}")
 
     # 6. Format and post comment
     comment = format_review_comment(review)
