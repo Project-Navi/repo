@@ -45,15 +45,20 @@ From the Grippy framework into the target repo:
 
 The full Grippy orchestrator (webhook → queue → router → agent loop → post) is NOT part of nboot. nboot templates the prompt modules and configuration. The orchestrator is a separate deployment concern — either the standalone GitHub App or the Navi SDK embedded version.
 
-## Open Question
+## Resolved: Local-First Architecture
 
-**Is Grippy shipping as a standalone GitHub App, or is the prompt-only framework the product?**
+**Grippy ships local-first.** Devstral Q8 (64k context) on Ollama/LMStudio is the default runtime — no cloud API required. The 21 prompt files are engineered to constrain a local model into structured output, and the confidence filter catches the rest.
 
-This determines:
-- If standalone app: the review-system pack also templates deployment infrastructure (GitHub App manifest, webhook handlers, permissions)
-- If prompt-only: the review-system pack templates just the prompt modules and config, and the orchestrator is someone else's problem
+This means:
+- The review-system pack templates `.grippy.yaml` with local model config (Ollama endpoint, model name, context window)
+- Base pack CI templates can include a Grippy step on self-hosted runners
+- The orchestrator is thin — prompt assembly + Ollama API call + JSON parse + confidence filter + post to GitHub
+- Cloud models (Claude, GPT) are a config swap, not the default
+- GitHub App is a deployment option, not a requirement
 
-The prompt-only framework is already valuable without the orchestrator — it can be used with Claude Code's built-in review capabilities, GitHub's native AI review features, or any LLM-based review pipeline. The orchestrator adds automation but isn't required for the methodology to work.
+**Reference test environment:** Nelson's 3090 24GB homelab on Tailscale.
+
+The prompt-only framework is already valuable without the orchestrator — it can be used with Claude Code's built-in review capabilities, GitHub's native AI review features, or any LLM-based review pipeline.
 
 ## File Map (for reference)
 
