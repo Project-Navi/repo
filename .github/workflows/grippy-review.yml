@@ -39,8 +39,6 @@ jobs:
         with:
           path: ./grippy-data
           key: grippy-data-${{ github.sha }}
-          restore-keys: |
-            grippy-data-
 
       - name: Install navi-bootstrap with grippy extras
         run: pip install ".[grippy,grippy-persistence]"

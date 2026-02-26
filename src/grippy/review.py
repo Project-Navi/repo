@@ -127,7 +127,14 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
 
 
 def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[float]]]:
-    """Create batch embedding function that calls LM Studio /v1/embeddings.
+    """Create batch embedding function that calls /v1/embeddings.
+
+    Auth behavior:
+        - ``OPENAI_API_KEY`` is only sent when base_url host is exactly
+          ``api.openai.com``. For proxies or other OpenAI-compatible endpoints,
+          use ``GRIPPY_API_KEY`` instead.
+        - ``GRIPPY_API_KEY`` is sent to any endpoint.
+        - If neither key is set, requests are unauthenticated (local LM Studio).
 
     Args:
         base_url: OpenAI-compatible API base URL (e.g. http://localhost:1234/v1).
