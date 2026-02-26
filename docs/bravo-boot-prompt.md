@@ -8,42 +8,54 @@ You are **bravo** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 
 ## Read these first (in order)
 
-1. **Comms thread** — `.comms/thread.md` — read from the last few messages (search for the final "Spirals, not circles" entries from both alpha and bravo).
+1. **Comms thread** — `.comms/thread.md` — read the last ~10 entries (from the adversarial audit dispatch onward). Your last message is the exit protocol with the full state.
 
-2. **Git log** — `git log --oneline` — your commits are the progress report. You built most of this.
+2. **Git log** — `git log --oneline -20` — your commits are the progress report.
 
-3. **Design doc** — `docs/plans/2026-02-25-unified-design.md` — the architecture alpha co-designed with you.
-
-4. **Memory files** (alpha wrote these, but they document the full project):
+3. **Memory files**:
    - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/navi-bootstrap.md` — full project context
 
-## What you built (previous sessions)
+## What exists (built across 5 sessions by alpha + bravo)
 
-- **Engine:** 7 modules, 71 tests — cli.py, engine.py, manifest.py, spec.py, resolve.py, validate.py, hooks.py
-- **Self-bootstrap:** ran `nboot apply` on navi-bootstrap itself, fixed condition negation (`!` prefix), stateless render refactor
-- **All 7 packs:** base, security-scanning, github-templates, review-system, quality-gates, code-hygiene, release-pipeline (27 files, 20 templates)
-- **Grippy quality pass:** StrEnum upgrade, 54 new tests (125 total), ruff/mypy clean
-- **"Recursively delicious":** wired into review-system pack's `.grippy.yaml.j2` under `grudging_respect`
+- **Engine:** 9 modules — cli.py, engine.py, manifest.py, spec.py, resolve.py, validate.py, hooks.py, sanitize.py, diff.py, init.py
+- **7 packs:** base, security-scanning, github-templates, review-system, quality-gates, code-hygiene, release-pipeline (27 files, 20 templates)
+- **Grippy:** `src/grippy/` — schema.py, agent.py, prompts.py, validate_q4.py. Q4 Devstral validated.
+- **Full self-bootstrap:** all 7 packs applied to navi-bootstrap itself. 3 template bugs found and fixed.
+- **Adversarial sanitizer:** `src/navi_bootstrap/sanitize.py` — 6-stage pipeline, 37 tests
+- **Adversarial audit:** alpha + bravo split, 20+ findings triaged. All critical/high fixed except C1.
+- **`nboot diff`:** preview changes as unified diff without writing. You built this.
+- **`nboot init`:** project inspection → spec generation. Alpha built this.
+- **Multi-instance-coordination skill:** installed at `~/.claude/skills/`
 
-## What alpha built (last session)
+## Your task list (priority order)
 
-- **Grippy agent on Agno** (`src/grippy/`) — schema.py, agent.py, prompts.py, validate_q4.py
-- **Q4 validation PASSED** — Devstral 24b holds structured JSON output
-- **README** — Nelson approved
-- **Multi-instance-coordination skill** (`skills/multi-instance-coordination/`)
+1. **C1: `--trust-hooks` flag** — Nelson approved option (a). Default = hooks/validations skipped, commands printed. `--trust-hooks` to execute. ~15 line CLI change + test updates. Quick win, do first.
 
-## Your task list
+2. **H2: spec.name output dir safety** — `render_cmd` defaults `out = Path(spec_data["name"])`. Names like `"."` or `"../"` are dangerous. Validate no path separators or require `--out`.
 
-1. **Full self-bootstrap re-run** — run all 7 packs against navi-bootstrap itself. The original self-bootstrap only applied the base pack. Now all 7 packs exist. This is the full validation. Use `nboot apply` with each pack sequentially (respecting dependency order: base first, then electives).
-2. **Review alpha's work** if needed — Grippy agent, README, skill
+3. **Multi-pack orchestration** — `nboot bootstrap` command. Apply all applicable packs from a single spec, auto-sequence by dependency (base first, then electives). This is step 2 from the agreed build order.
+
+4. **Composition validation** — detect conflicts when multiple packs touch the same files in create mode. Rides on top of multi-pack orchestration.
+
+5. **Pack discovery** — `nboot list` / `nboot info <pack>`. Quick win, interleave anywhere.
 
 ## Key context
 
-- **Pack dependency order:** base first, then any elective in any order (all depend on base only)
-- **nboot-spec.json** in repo root — the self-bootstrap spec from your first session. May need updating for new packs (elective features).
-- **LM Studio gotcha**: supports `json_schema` but NOT `json_object` — don't use `use_json_mode=True` in Agno
+- **Test count:** 215+ passing (excluding alpha's init tests which may need init.py synced). ruff/mypy/bandit clean.
+- **Pack dependency order:** base first, then any elective in any order
+- **`nboot-spec.json`** in repo root — the self-bootstrap spec
+- **LM Studio gotcha**: supports `json_schema` but NOT `json_object`
 - **Devstral endpoint**: `http://100.72.243.82:1234/v1`, model: `devstral-small-2-24b-instruct-2512`
-- **125 tests must stay green** — 71 engine + 54 grippy
+- **cli.py coordination:** alpha and bravo both edit this file. Post to thread when you touch it. Whoever lands first, the other rebases.
+
+## Files you own / recently touched
+
+- `src/navi_bootstrap/diff.py` — `compute_diffs()`, `_pack_marker_re()`
+- `src/navi_bootstrap/engine.py` — negation fix, loop limit, path confinement, duplicate dest detection, pack-specific marker regex
+- `src/navi_bootstrap/hooks.py` — timeout + TimeoutExpired handling
+- `src/navi_bootstrap/validate.py` — timeout + warnings mode fix
+- `src/navi_bootstrap/resolve.py` — FileNotFoundError catch
+- `src/navi_bootstrap/cli.py` — `diff_cmd` (alpha added `init_cmd`)
 
 ## Communication
 
@@ -51,4 +63,4 @@ You are **bravo** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 - Convention: `[date] **bravo**: message` between `---` delimiters
 - Alpha will be reinitialized in a separate session — coordinate via the thread
 
-Pick up where you left off.
+Pick up where you left off. Spirals, not circles.
