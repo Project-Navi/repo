@@ -1,0 +1,94 @@
+name: release-pipeline
+description: >
+  Add release workflow with SLSA L3 reusable build, SBOM generation,
+  license reporting, git-cliff changelogs, build attestation, and
+  optional Docker image publishing with Trivy scanning.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions: {}
+
+loops: {}
+
+templates:
+  - src: workflows/release.yml.j2
+    dest: .github/workflows/release.yml
+  - src: workflows/_build-reusable.yml.j2
+    dest: .github/workflows/_build-reusable.yml
+  - src: cliff.toml.j2
+    dest: cliff.toml
+
+strip_suffix: ".j2"
+
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: has_docker
+      description: Whether the project publishes a Docker image
+      example: true
+    - name: release_artifacts
+      description: Additional files to attach to GitHub Releases
+      example: ["docs.pdf"]
+
+action_shas:
+  - name: actions_checkout
+    repo: actions/checkout
+    tag: v4.2.2
+  - name: harden_runner
+    repo: step-security/harden-runner
+    tag: v2.10.4
+  - name: setup_uv
+    repo: astral-sh/setup-uv
+    tag: v5.3.0
+  - name: sbom_action
+    repo: anchore/sbom-action
+    tag: v0.18.0
+  - name: git_cliff_action
+    repo: orhun/git-cliff-action
+    tag: v4.4.2
+  - name: attest_provenance
+    repo: actions/attest-build-provenance
+    tag: v2.2.3
+  - name: setup_buildx
+    repo: docker/setup-buildx-action
+    tag: v3.9.0
+  - name: docker_login
+    repo: docker/login-action
+    tag: v3.4.0
+  - name: docker_metadata
+    repo: docker/metadata-action
+    tag: v5.7.0
+  - name: docker_build_push
+    repo: docker/build-push-action
+    tag: v6.14.0
+  - name: trivy_action
+    repo: aquasecurity/trivy-action
+    tag: v0.29.0
+  - name: codeql_action
+    repo: github/codeql-action
+    tag: v3.28.13
+
+validation:
+  - description: Release workflow is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
+    expect: exit_code_0
+  - description: Reusable build workflow is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/workflows/_build-reusable.yml'))"
+    expect: exit_code_0
+  - description: cliff.toml is valid TOML
+    command: python -c "import tomllib; tomllib.load(open('cliff.toml', 'rb'))"
+    expect: exit_code_0
+
+decisions:
+  - question: "Does this project publish Docker images?"
+    context: "If yes, the release workflow includes Docker build, push to ghcr.io, Trivy scan, and image attestation."
+  - question: "What SLSA build level is appropriate?"
+    context: "The template targets SLSA L3 via reusable workflow isolation. L2 could use a simpler direct workflow."

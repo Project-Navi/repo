@@ -1,0 +1,20 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  build:
+    uses: ./.github/workflows/_build-reusable.yml
+    with:
+      tag_name: {% raw %}${{ github.ref_name }}{% endraw %}
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
