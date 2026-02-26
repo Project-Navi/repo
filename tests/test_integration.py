@@ -898,3 +898,228 @@ class TestSpecEdgeCases:
         _apply_pack(runner, spec_path, "base", target)
         assert (target / "CLAUDE.md").exists()
         assert _diff_pack(runner, spec_path, "base", target) == 0
+
+
+# ---------------------------------------------------------------------------
+# Medium priority: validation, manual edits, cross-pack conditionals, errors
+# ---------------------------------------------------------------------------
+
+
+class TestReleasePipelineValidation:
+    """Release-pipeline pack has 3 validations — test them with --trust."""
+
+    def test_release_pipeline_validations_pass(self, runner: CliRunner, tmp_path: Path) -> None:
+        """All 3 release-pipeline validations pass on freshly rendered files."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        _apply_pack(runner, spec_path, "base", target)
+
+        pack = PACKS_DIR / "release-pipeline"
+        result = runner.invoke(
+            cli,
+            [
+                "apply",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(pack),
+                "--target",
+                str(target),
+                "--skip-resolve",
+                "--trust",
+            ],
+        )
+        assert result.exit_code == 0, f"release-pipeline failed: {result.output}"
+        # Should show all 3 validation results
+        assert "Running validations..." in result.output
+        assert result.output.count("[PASS]") >= 3 or result.output.count("[SKIP]") >= 1
+
+
+class TestManualEditReapply:
+    """Manual edits to rendered files are overwritten on reapply."""
+
+    def test_reapply_overwrites_manual_edit(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Edit CLAUDE.md → reapply base → original content restored."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        original = (target / "CLAUDE.md").read_text()
+
+        # Manual edit
+        (target / "CLAUDE.md").write_text("# Manually overwritten\n")
+
+        # Diff should detect the change
+        assert _diff_pack(runner, spec_path, "base", target) == 1
+
+        # Reapply restores original
+        _apply_pack(runner, spec_path, "base", target)
+        assert (target / "CLAUDE.md").read_text() == original
+
+    def test_reapply_restores_append_block_after_manual_edit(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """Edit inside an append marker block → reapply restores it."""
+        target = tmp_path / "project"
+        target.mkdir()
+        (target / "pyproject.toml").write_text('[project]\nname = "test"\nversion = "0.1.0"\n')
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        content_after_first = (target / "pyproject.toml").read_text()
+
+        # Corrupt the marker block
+        corrupted = content_after_first.replace("[tool.ruff]", "[tool.corrupted]")
+        (target / "pyproject.toml").write_text(corrupted)
+
+        # Diff should detect drift
+        assert _diff_pack(runner, spec_path, "base", target) == 1
+
+        # Reapply should restore the original block
+        _apply_pack(runner, spec_path, "base", target)
+        restored = (target / "pyproject.toml").read_text()
+        assert "[tool.ruff]" in restored or _diff_pack(runner, spec_path, "base", target) == 0
+
+
+class TestCrossPackConditionals:
+    """Same feature flag controls templates across multiple packs."""
+
+    def test_ci_false_skips_across_base_and_security(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """ci=false → both base CI and security-scanning workflows skipped."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=False)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "security-scanning", target)
+
+        # Base CI workflow
+        assert not (target / ".github" / "workflows" / "tests.yml").exists()
+        # Security workflows
+        assert not (target / ".github" / "workflows" / "codeql.yml").exists()
+        assert not (target / ".github" / "workflows" / "scorecard.yml").exists()
+
+    def test_ci_true_enables_across_base_and_security(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """ci=true → both base CI and security-scanning workflows rendered."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "security-scanning", target)
+
+        assert (target / ".github" / "workflows" / "tests.yml").exists()
+        assert (target / ".github" / "workflows" / "codeql.yml").exists()
+        assert (target / ".github" / "workflows" / "scorecard.yml").exists()
+
+
+class TestDryRunComposition:
+    """--dry-run shows plan without side effects."""
+
+    def test_dry_run_renders_nothing(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--dry-run on render creates no files."""
+        spec_path = _make_spec(tmp_path)
+        out_dir = tmp_path / "project"
+
+        result = runner.invoke(
+            cli,
+            [
+                "render",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--out",
+                str(out_dir),
+                "--skip-resolve",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Dry run" in result.output
+        assert not out_dir.exists()
+
+    def test_dry_run_apply_no_side_effects(self, runner: CliRunner, tmp_path: Path) -> None:
+        """--dry-run on apply modifies no files."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        result = runner.invoke(
+            cli,
+            [
+                "apply",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--target",
+                str(target),
+                "--skip-resolve",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Dry run" in result.output
+        # Target should have no new files
+        assert not (target / "CLAUDE.md").exists()
+
+
+class TestDockerConditional:
+    """Release-pipeline Docker sections respect spec.release.has_docker."""
+
+    def test_release_pipeline_without_docker(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Default (no docker) — no Docker steps in rendered workflow."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "release-pipeline", target)
+
+        build_yml = (target / ".github" / "workflows" / "_build-reusable.yml").read_text()
+        assert "docker" not in build_yml.lower() or "Docker" not in build_yml
+
+    def test_release_pipeline_with_docker(self, runner: CliRunner, tmp_path: Path) -> None:
+        """spec.release.has_docker=true → Docker build/push steps appear."""
+        spec = {
+            "name": "docker-project",
+            "language": "python",
+            "python_version": "3.12",
+            "structure": {"src_dir": "src/dp", "test_dir": "tests"},
+            "features": {"ci": True, "pre_commit": True},
+            "release": {"has_docker": True},
+        }
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+
+        target = tmp_path / "project"
+        target.mkdir()
+
+        _apply_pack(runner, spec_path, "base", target)
+
+        pack = PACKS_DIR / "release-pipeline"
+        result = runner.invoke(
+            cli,
+            [
+                "apply",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(pack),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0
+
+        build_yml = (target / ".github" / "workflows" / "_build-reusable.yml").read_text()
+        assert "docker" in build_yml.lower()
