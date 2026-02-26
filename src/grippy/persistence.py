@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import lancedb
+import lancedb  # type: ignore[import-untyped]
 
 from grippy.graph import EdgeType, NodeType, ReviewGraph
 
@@ -147,8 +147,8 @@ class GrippyStore:
 
     def _store_nodes(self, graph: ReviewGraph) -> None:
         """Embed and store nodes in LanceDB for vector search."""
-        records = []
-        texts = []
+        records: list[dict[str, Any]] = []
+        texts: list[str] = []
         for node in graph.nodes:
             text = f"{node.type.value}: {node.label}"
             if node.properties:
