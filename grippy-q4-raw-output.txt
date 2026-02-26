@@ -1,0 +1,1 @@
+'response_format.type' must be 'json_schema' or 'text'
