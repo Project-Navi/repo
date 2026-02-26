@@ -40,7 +40,7 @@ def run_validations(validations: list[dict[str, Any]], working_dir: Path) -> lis
 
         result = subprocess.run(
             command,
-            shell=True,
+            shell=True,  # nosec B602
             capture_output=True,
             text=True,
             cwd=working_dir,

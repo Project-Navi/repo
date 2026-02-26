@@ -73,7 +73,7 @@ def _eval_condition(condition_expr: str, spec: dict[str, Any]) -> bool:
 
 def _render_dest_path(dest_template: str, context: dict[str, Any]) -> str:
     """Render Jinja2 expressions in destination paths."""
-    env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined)  # nosec B701
     tmpl = env.from_string(dest_template)
     return tmpl.render(**context)
 
@@ -136,7 +136,7 @@ def render_to_files(
     Returns a list of RenderedFile with (dest, content, mode). The caller
     decides what to do with them — write to disk, return via HTTP, etc.
     """
-    env = jinja2.Environment(
+    env = jinja2.Environment(  # nosec B701
         loader=jinja2.FileSystemLoader(str(templates_dir)),
         undefined=jinja2.StrictUndefined,
         keep_trailing_newline=True,

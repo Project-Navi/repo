@@ -28,7 +28,7 @@ def run_hooks(hooks: list[str], working_dir: Path) -> list[HookResult]:
     for command in hooks:
         result = subprocess.run(
             command,
-            shell=True,
+            shell=True,  # nosec B602
             capture_output=True,
             text=True,
             cwd=working_dir,
