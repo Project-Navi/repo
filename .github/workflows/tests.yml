@@ -24,14 +24,14 @@ jobs:
 
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@SKIP_SHA_RESOLUTION  # v2.10.4
+        uses: step-security/harden-runner@cb605e52c26070c328afc4562f0b4ada7618a84e  # v2.10.4
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@SKIP_SHA_RESOLUTION  # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@SKIP_SHA_RESOLUTION  # v5.4.0
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38  # v5.4.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -51,14 +51,14 @@ jobs:
       contents: read
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@SKIP_SHA_RESOLUTION  # v2.10.4
+        uses: step-security/harden-runner@cb605e52c26070c328afc4562f0b4ada7618a84e  # v2.10.4
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@SKIP_SHA_RESOLUTION  # v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@SKIP_SHA_RESOLUTION  # v5.4.0
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38  # v5.4.0
         with:
           python-version: "3.12"
 

@@ -20,6 +20,12 @@ dependencies = [
     "jsonschema>=4.20.0",
 ]
 
+[project.optional-dependencies]
+grippy = [
+    "agno[openai]>=1.1.0",
+    "pydantic>=2.0.0",
+]
+
 [project.scripts]
 nboot = "navi_bootstrap.cli:cli"
 
@@ -29,6 +35,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.9.0",
     "mypy>=1.8.0",
+    "agno>=1.1.0",
 ]
 
 [tool.ruff]

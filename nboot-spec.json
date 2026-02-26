@@ -21,19 +21,31 @@
     "pre_commit": true
   },
 
+  "github": {
+    "org": "Project-Navi",
+    "repo": "navi-bootstrap"
+  },
+
+  "release": {
+    "has_docker": false
+  },
+
   "recon": {
     "test_framework": "pytest",
-    "test_count": 67,
+    "test_count": 125,
+    "coverage_pct": 89,
     "python_test_versions": ["3.12", "3.13"],
-    "existing_ci": [],
+    "codeql_languages": ["python"],
+    "existing_ci": ["tests.yml"],
     "existing_tools": {
       "ruff": true,
       "mypy": true,
       "bandit": false,
-      "pre_commit": false,
-      "dependabot": false
+      "pre_commit": true,
+      "dependabot": true
     },
     "has_pyproject_toml": true,
-    "has_github_dir": false
+    "has_github_dir": true,
+    "updated_at": "2026-02-25T00:00:00+00:00"
   }
 }

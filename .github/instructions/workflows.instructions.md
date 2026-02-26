@@ -1,0 +1,36 @@
+---
+applyTo: ".github/workflows/**/*.yml,.github/workflows/**/*.yaml"
+---
+
+# GitHub Actions Workflow Review Instructions
+
+## Action Pinning
+
+All third-party actions MUST be pinned to a full commit SHA, not a version tag.
+
+```yaml
+# Correct
+- uses: actions/checkout@<full-sha>  # v4.2.2
+
+# Wrong
+- uses: actions/checkout@v4
+```
+
+Tags are mutable. A compromised upstream can change what `v4` points to. SHA pinning is the only supply-chain defense that actually works.
+
+If a PR adds or updates an action without SHA pinning, that is a blocking issue.
+
+**Exception**: Actions from the same repository (`./` prefix) don't require SHA pinning, but it's still preferred.
+
+## Workflow Security
+
+- **`pull_request_target` trigger**: Runs with write access in the context of the base branch. If a workflow uses `pull_request_target` and checks out PR code, that's a code injection vector. Flag as P0.
+- **Expression injection**: Untrusted input in `${{ }}` expressions (especially `github.event.issue.title`, `github.event.pull_request.body`) can lead to script injection. Pass through environment variables, not interpolated directly into `run:` blocks.
+- **Permissions**: Workflows should declare minimal `permissions` at the job or workflow level. No `permissions` key = default token permissions, which may be broader than needed.
+- **Secret exposure**: Secrets must never be echoed, logged, or written to artifacts.
+
+## General Workflow Hygiene
+
+- **Timeout**: Long-running jobs should have `timeout-minutes` set. A hung job with no timeout wastes runner capacity.
+- **Concurrency**: Workflows triggered by push/PR should use `concurrency` groups to cancel superseded runs.
+- **Artifact retention**: If workflows upload artifacts, check that `retention-days` is set.

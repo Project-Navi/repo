@@ -1,0 +1,101 @@
+name: Reusable Build (SLSA L3)
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+
+
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@cb605e52c26070c328afc4562f0b4ada7618a84e  # v2.10.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1edb52594c857e2b5b13128931090f0640537287  # v5.3.0
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run test suite
+        run: uv run pytest tests/ -x -q
+
+      - name: Generate SBOM (CycloneDX)
+        run: uv run cyclonedx-py environment --output-format json -o sbom.cdx.json
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0  # v0.18.0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Generate license report
+        run: |
+          uv run pip-licenses --format=csv --with-urls --with-authors --output-file licenses.csv
+          uv run pip-licenses --format=plain-vertical --with-urls --with-authors --output-file licenses.txt
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@4a4a951bc43fafe41cd2348d181853f52356bee7  # v4.4.2
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Fallback for empty release notes
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${TAG_NAME}" > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes-file release-notes.md \
+            sbom.cdx.json \
+            sbom.spdx.json \
+            licenses.csv \
+            licenses.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2  # v2.2.3
+        with:
+          subject-path: |
+            sbom.cdx.json
+            sbom.spdx.json
+            licenses.csv
+            licenses.txt
+
+
