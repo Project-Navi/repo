@@ -1,0 +1,72 @@
+# Manifest schema for nboot template packs
+# Validated by the engine at Stage 1
+type: object
+required:
+  - name
+  - version
+  - templates
+properties:
+  name:
+    type: string
+    minLength: 1
+  description:
+    type: string
+  version:
+    type: string
+  conditions:
+    type: object
+    additionalProperties:
+      type: string
+  loops:
+    type: object
+    additionalProperties:
+      type: object
+      required: [over, as]
+      properties:
+        over:
+          type: string
+        as:
+          type: string
+  templates:
+    type: array
+    items:
+      type: object
+      required: [src, dest]
+      properties:
+        src:
+          type: string
+        dest:
+          type: string
+        mode:
+          type: string
+          enum: [create, append]
+  strip_suffix:
+    type: string
+  hooks:
+    type: array
+    items:
+      type: string
+  # Agent-workflow fields (engine ignores, but schema allows)
+  dependencies:
+    type: array
+    items:
+      type: string
+  inputs:
+    type: object
+  action_shas:
+    type: array
+    items:
+      type: object
+      required: [name, repo, tag]
+      properties:
+        name:
+          type: string
+        repo:
+          type: string
+        tag:
+          type: string
+  validation:
+    type: array
+  decisions:
+    type: array
+additionalProperties: true

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "nboot Project Spec",
+  "type": "object",
+  "required": ["name", "language"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "license": { "type": "string" },
+    "language": { "type": "string", "enum": ["python", "typescript", "go", "rust"] },
+    "python_version": { "type": "string", "pattern": "^3\\.[0-9]+$" },
+    "author": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "properties": {
+        "src_dir": { "type": "string" },
+        "test_dir": { "type": "string" },
+        "docs_dir": { "type": "string" }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "entry_points": { "type": "object" },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "runtime": { "type": "array", "items": { "type": "string" } },
+        "dev": { "type": "array", "items": { "type": "string" } },
+        "optional": { "type": "object" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "recon": { "type": "object" }
+  },
+  "additionalProperties": true
+}
