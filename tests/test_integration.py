@@ -592,3 +592,309 @@ class TestValidationComposition:
         manifest = yaml.safe_load((pack / "manifest.yaml").read_text())
         if manifest.get("validation"):
             assert "PASS" in result.output or "SKIP" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Wave 1: Critical composition boundaries
+# ---------------------------------------------------------------------------
+
+
+def _diff_pack(runner: CliRunner, spec_path: Path, pack_name: str, target: Path) -> int:
+    """Run diff on a named pack and return exit code."""
+    pack = PACKS_DIR / pack_name
+    result = runner.invoke(
+        cli,
+        [
+            "diff",
+            "--spec",
+            str(spec_path),
+            "--pack",
+            str(pack),
+            "--target",
+            str(target),
+            "--skip-resolve",
+        ],
+    )
+    return result.exit_code
+
+
+class TestReapplyIdempotency:
+    """Applying the same pack twice must not corrupt state."""
+
+    def test_double_apply_base_diff_clean(self, runner: CliRunner, tmp_path: Path) -> None:
+        """base applied twice → diff is still clean."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "base", target)
+
+        assert _diff_pack(runner, spec_path, "base", target) == 0
+
+    def test_double_apply_preserves_append_markers(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Append-mode file has exactly one marker block after double apply."""
+        target = tmp_path / "project"
+        target.mkdir()
+        # Need a pyproject.toml for append mode to target
+        (target / "pyproject.toml").write_text('[project]\nname = "test"\nversion = "0.1.0"\n')
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "base", target)
+
+        content = (target / "pyproject.toml").read_text()
+        marker_count = content.count("# --- nboot: base ---")
+        assert marker_count == 1, f"Expected 1 marker block, found {marker_count}:\n{content}"
+
+    def test_double_apply_elective_diff_clean(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Elective pack applied twice → diff still clean."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "github-templates", target)
+        _apply_pack(runner, spec_path, "github-templates", target)
+
+        assert _diff_pack(runner, spec_path, "github-templates", target) == 0
+
+
+class TestDiffUnappliedPack:
+    """Diff on packs that haven't been applied shows all files as new."""
+
+    def test_diff_on_empty_target_shows_changes(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Diffing a pack against an empty dir reports all files as changes."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        pack = PACKS_DIR / "github-templates"
+        result = runner.invoke(
+            cli,
+            [
+                "diff",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(pack),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 1  # changes detected
+        assert "(new)" in result.output
+        assert "would change" in result.output
+
+    def test_diff_base_on_empty_target(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Base pack diff against empty dir shows all base files as new."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        result = runner.invoke(
+            cli,
+            [
+                "diff",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "CLAUDE.md" in result.output
+
+
+class TestAllPacksSequential:
+    """Apply all 7 packs to a single target in dependency order."""
+
+    def test_all_packs_compose_and_diff_clean(self, runner: CliRunner, tmp_path: Path) -> None:
+        """base then all 6 electives → diff each is clean."""
+        target = tmp_path / "project"
+        target.mkdir()
+        # Need pyproject.toml for base append mode
+        (target / "pyproject.toml").write_text('[project]\nname = "test"\nversion = "0.1.0"\n')
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        pack_order = [
+            "base",
+            "code-hygiene",
+            "github-templates",
+            "quality-gates",
+            "release-pipeline",
+            "review-system",
+            "security-scanning",
+        ]
+
+        # Apply all in order
+        for pack_name in pack_order:
+            _apply_pack(runner, spec_path, pack_name, target)
+
+        # Diff each — all should be clean
+        for pack_name in pack_order:
+            exit_code = _diff_pack(runner, spec_path, pack_name, target)
+            assert exit_code == 0, f"Drift detected in {pack_name} after full apply"
+
+    def test_all_packs_file_count(self, runner: CliRunner, tmp_path: Path) -> None:
+        """All 7 packs produce at least 15 distinct files."""
+        target = tmp_path / "project"
+        target.mkdir()
+        (target / "pyproject.toml").write_text('[project]\nname = "test"\nversion = "0.1.0"\n')
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        pack_order = [
+            "base",
+            "code-hygiene",
+            "github-templates",
+            "quality-gates",
+            "release-pipeline",
+            "review-system",
+            "security-scanning",
+        ]
+
+        for pack_name in pack_order:
+            _apply_pack(runner, spec_path, pack_name, target)
+
+        # Count rendered files (excluding pyproject.toml which was pre-existing)
+        all_files = list(target.rglob("*"))
+        file_count = sum(1 for f in all_files if f.is_file())
+        assert file_count >= 15, f"Expected >=15 files, got {file_count}"
+
+
+class TestGreenfieldVsApply:
+    """Greenfield render and apply produce consistent output."""
+
+    def test_create_mode_files_match(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Create-mode files are identical in greenfield and apply."""
+        spec_path = _make_spec(tmp_path)
+
+        # Greenfield render
+        render_dir = tmp_path / "rendered"
+        runner.invoke(
+            cli,
+            [
+                "render",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--out",
+                str(render_dir),
+                "--skip-resolve",
+            ],
+        )
+
+        # Apply to existing dir
+        apply_dir = tmp_path / "applied"
+        apply_dir.mkdir()
+        (apply_dir / "pyproject.toml").write_text('[project]\nname = "test"\nversion = "0.1.0"\n')
+        _apply_pack(runner, spec_path, "base", apply_dir)
+
+        # Compare create-mode files (not append-mode like pyproject.toml)
+        for name in ["CLAUDE.md", "DEBT.md", ".github/dependabot.yml"]:
+            render_file = render_dir / name
+            apply_file = apply_dir / name
+            if render_file.exists() and apply_file.exists():
+                assert render_file.read_text() == apply_file.read_text(), f"Mismatch in {name}"
+
+    def test_greenfield_rejects_existing_file(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Greenfield mode fails when target already has a file."""
+        spec_path = _make_spec(tmp_path)
+        out_dir = tmp_path / "project"
+        out_dir.mkdir()
+        (out_dir / "CLAUDE.md").write_text("# existing\n")
+
+        result = runner.invoke(
+            cli,
+            [
+                "render",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--out",
+                str(out_dir),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "exists" in result.output.lower()
+
+
+class TestSpecEdgeCases:
+    """Spec edge cases through the full pipeline."""
+
+    def test_minimal_spec_applies(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Only name + language — every pack uses defaults gracefully."""
+        spec = {"name": "minimal", "language": "python"}
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+
+        target = tmp_path / "project"
+        target.mkdir()
+
+        pack = PACKS_DIR / "base"
+        result = runner.invoke(
+            cli,
+            [
+                "apply",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(pack),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0, f"Minimal spec failed: {result.output}"
+        assert (target / "CLAUDE.md").exists()
+
+        # Defaults should appear in rendered content
+        claude_md = (target / "CLAUDE.md").read_text()
+        assert "minimal" in claude_md
+        assert "3.12" in claude_md  # default python_version
+
+    def test_empty_features_skips_conditional_templates(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """features: {} means all conditionals evaluate false."""
+        spec = {"name": "bare", "language": "python", "features": {}}
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+
+        target = tmp_path / "project"
+        target.mkdir()
+
+        _apply_pack(runner, spec_path, "base", target)
+
+        # ci conditional templates should NOT render
+        assert not (target / ".github" / "workflows" / "tests.yml").exists()
+        # pre_commit conditional template should NOT render
+        assert not (target / ".pre-commit-config.yaml").exists()
+        # Unconditional files should render
+        assert (target / "CLAUDE.md").exists()
+        assert (target / "DEBT.md").exists()
+
+    def test_extra_unknown_fields_pass_through(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Extra fields in spec are allowed and don't break rendering."""
+        spec = {
+            "name": "extended",
+            "language": "python",
+            "custom_field": "hello",
+            "nested": {"anything": True},
+            "features": {"ci": True, "pre_commit": True},
+        }
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+
+        target = tmp_path / "project"
+        target.mkdir()
+
+        _apply_pack(runner, spec_path, "base", target)
+        assert (target / "CLAUDE.md").exists()
+        assert _diff_pack(runner, spec_path, "base", target) == 0
