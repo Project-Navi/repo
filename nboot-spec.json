@@ -1,0 +1,39 @@
+{
+  "name": "navi-bootstrap",
+  "version": "0.1.0",
+  "description": "Jinja2 rendering engine and template packs for bootstrapping projects to navi-os-grade posture",
+  "language": "python",
+  "python_version": "3.12",
+
+  "structure": {
+    "src_dir": "src/navi_bootstrap",
+    "test_dir": "tests"
+  },
+
+  "dependencies": {
+    "runtime": ["click", "jinja2", "pyyaml", "jsonschema"],
+    "dev": ["pytest", "pytest-cov", "ruff", "mypy"],
+    "optional": {}
+  },
+
+  "features": {
+    "ci": true,
+    "pre_commit": true
+  },
+
+  "recon": {
+    "test_framework": "pytest",
+    "test_count": 67,
+    "python_test_versions": ["3.12", "3.13"],
+    "existing_ci": [],
+    "existing_tools": {
+      "ruff": true,
+      "mypy": true,
+      "bandit": false,
+      "pre_commit": false,
+      "dependabot": false
+    },
+    "has_pyproject_toml": true,
+    "has_github_dir": false
+  }
+}

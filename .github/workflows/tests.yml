@@ -1,0 +1,81 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@SKIP_SHA_RESOLUTION  # v2.10.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@SKIP_SHA_RESOLUTION  # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@SKIP_SHA_RESOLUTION  # v5.4.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ -v --cov=src/navi_bootstrap --cov-report=term-missing
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@SKIP_SHA_RESOLUTION  # v2.10.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@SKIP_SHA_RESOLUTION  # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@SKIP_SHA_RESOLUTION  # v5.4.0
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check src/navi_bootstrap/ tests/
+
+      - name: Format check
+        run: uv run ruff format --check src/navi_bootstrap/ tests/
+
+      - name: Security scan
+        run: uv run bandit -r src/navi_bootstrap -ll
+
+      - name: Type check
+        run: uv run mypy src/navi_bootstrap/ --ignore-missing-imports
