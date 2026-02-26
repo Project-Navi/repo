@@ -139,10 +139,13 @@ def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[
     import requests  # type: ignore[import-untyped]
 
     def embed(texts: list[str]) -> list[list[float]]:
+        from urllib.parse import urlparse
+
         url = f"{base_url}/embeddings"
         headers: dict[str, str] = {}
         # Only send OPENAI_API_KEY to OpenAI hosts; use GRIPPY_API_KEY for others
-        is_openai_host = "api.openai.com" in base_url
+        parsed = urlparse(base_url)
+        is_openai_host = parsed.hostname == "api.openai.com"
         openai_key = os.environ.get("OPENAI_API_KEY") or ""
         grippy_key = os.environ.get("GRIPPY_API_KEY") or ""
         if is_openai_host and openai_key:
