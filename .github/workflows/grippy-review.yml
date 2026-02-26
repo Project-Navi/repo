@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install navi-bootstrap with grippy extras
-        run: pip install ".[grippy]"
+        run: pip install ".[grippy,grippy-persistence]"
 
       - name: Run Grippy review
         id: review
@@ -32,6 +32,9 @@ jobs:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GRIPPY_BASE_URL: ${{ secrets.GRIPPY_BASE_URL }}
           GRIPPY_MODEL_ID: ${{ secrets.GRIPPY_MODEL_ID }}
+          GRIPPY_EMBEDDING_MODEL: ${{ secrets.GRIPPY_EMBEDDING_MODEL }}
+          GRIPPY_DATA_DIR: /opt/grippy-data
+          GRIPPY_TIMEOUT: '300'
         run: python -m grippy.review
 
       - name: Review summary
