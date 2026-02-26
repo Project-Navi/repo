@@ -1,0 +1,92 @@
+name: Bug Report
+description: Report a bug in {{ spec.name }}
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before submitting
+
+        - [ ] I have searched existing issues to avoid duplicates
+        - [ ] I can reproduce this bug on the latest version
+
+        Thanks for taking the time to report this bug!
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run '...'
+        2. With arguments '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+      placeholder: Describe what you expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened.
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: bug-category
+    attributes:
+      label: Bug Category
+      description: Select the category that best describes this bug.
+      options:
+{% for cat in spec.github.bug_categories | default(["Bug", "Performance", "Security", "Documentation", "Developer Experience"]) %}
+        - {{ cat }}
+{% endfor %}
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: Output of `python --version`
+      placeholder: "3.12.0"
+    validations:
+      required: true
+
+  - type: input
+    id: package-version
+    attributes:
+      label: {{ spec.name }} Version
+      description: Output of `pip show {{ spec.name }}` or the version you are using.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other context, logs, or screenshots about the bug.
+      placeholder: Add any other context here...
+    validations:
+      required: false

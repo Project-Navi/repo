@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+{% if spec.github is defined and spec.github.docs_url is defined and spec.github.docs_url %}
+  - name: Documentation
+    url: {{ spec.github.docs_url }}
+    about: Check the documentation before opening an issue
+{% endif %}
+  - name: Security Vulnerability
+    url: https://github.com/{{ spec.github.org | default("OWNER") }}/{{ spec.github.repo | default(spec.name) }}/security/advisories/new
+    about: Report security vulnerabilities privately
