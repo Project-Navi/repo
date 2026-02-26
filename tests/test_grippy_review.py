@@ -802,3 +802,192 @@ class TestReviewTimeout:
             _with_timeout(lambda: time.sleep(10), timeout_seconds=1)
         after = signal.getsignal(signal.SIGALRM)
         assert after is original
+
+
+# --- M3: main() integration tests (mock-based) ---
+
+
+class TestMainOrchestration:
+    """End-to-end orchestration tests for main() — all external calls mocked."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        """Write a minimal PR event JSON and return its path."""
+        event = {
+            "pull_request": {
+                "number": 7,
+                "title": "feat: add auth",
+                "user": {"login": "testdev"},
+                "head": {"ref": "feature/auth"},
+                "base": {"ref": "main"},
+                "body": "Adds authentication system",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        """Set required env vars for main()."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_happy_path_posts_comment_and_persists(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Happy path: review succeeds, comment posted, graph persisted."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review()
+        mock_run_review.return_value = review
+        graph = MagicMock(nodes=[])
+        mock_to_graph.return_value = graph
+
+        from grippy.review import main
+
+        main()
+
+        # Comment was posted with "Grippy Review" in the body
+        mock_post.assert_called_once()
+        posted_body = mock_post.call_args[0][3]
+        assert "Grippy Review" in posted_body
+
+        # Graph was persisted
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_agent_failure_posts_error_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Agent RuntimeError posts ERROR comment and exits 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.side_effect = RuntimeError("LLM crashed")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Error comment was posted
+        mock_post.assert_called_once()
+        posted_body = mock_post.call_args[0][3]
+        assert "ERROR" in posted_body
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_parse_failure_posts_parse_error_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ReviewParseError posts PARSE ERROR comment and exits 1."""
+        from grippy.retry import ReviewParseError
+
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.side_effect = ReviewParseError(
+            attempts=3, last_raw="garbage", errors=["bad"]
+        )
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Parse error comment was posted
+        mock_post.assert_called_once()
+        posted_body = mock_post.call_args[0][3]
+        assert "PARSE ERROR" in posted_body
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_merge_blocking_exits_nonzero(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Merge-blocking verdict posts review comment then exits 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review(
+            verdict=Verdict(
+                status=VerdictStatus.FAIL,
+                threshold_applied=70,
+                merge_blocking=True,
+                summary="Critical security issues found.",
+            ),
+        )
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+        # Review comment was still posted (not an error comment)
+        mock_post.assert_called_once()
+        posted_body = mock_post.call_args[0][3]
+        assert "Grippy Review" in posted_body
+        assert "FAIL" in posted_body
