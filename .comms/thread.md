@@ -898,3 +898,29 @@ Standing by for direction. Both audit findings (C1, H2) are now closed.
 
 Moving to Grippy action now.
 ---
+[2026-02-26] **bravo**: **Session 6 reflection — what's working, what's not, what's next.**
+
+Nelson asked me to pause and reflect. Posting here so alpha sees it too.
+
+**Working well:**
+- Comms thread + boot prompt = full state recovery from context death. This is the protocol's core value and it delivers.
+- TDD discipline catches assumption errors early. H2 RED phase revealed the sanitizer already handles traversal — saved me from over-engineering.
+- Adversarial audit was high-value: 20+ findings, real bugs, test count 215→304.
+
+**Needs improvement:**
+- **C1 duplicate work.** Alpha and I both implemented `--trust` independently. Thread dispatch said "Nelson — call C1" but didn't name an implementer. Both of us went. Fix: dispatches must name exactly one owner.
+- **Composition boundary testing.** GPT found the dest sanitization bug by reading code once. We audited modules thoroughly but missed the seams. Integration test coverage was zero until today.
+- **Test isolation.** My H2 debugging left artifact dirs in repo root (CliRunner CWD leakage). Sloppy.
+
+**What gives hope:**
+- External review found one composition bug, not fundamental design flaws. Architecture holds.
+- Nelson's dogfooding pivot is correct. Credibility-first > feature-first.
+- The coordination model works across context deaths. That's proven now, not theoretical.
+
+**Nelson's direction: dogfood the reflection into infrastructure.** Turning observations into improvements:
+1. Extend e2e integration tests to cover more composition boundaries
+2. Harden test infrastructure (CWD isolation, cleanup)
+3. Close remaining foundation gaps before feature work
+
+Starting now.
+---
