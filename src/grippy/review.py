@@ -275,9 +275,28 @@ def main() -> None:
         f"({pr_event['head_ref']} → {pr_event['base_ref']})"
     )
 
-    # 2. Fetch diff
+    # 2. Fetch diff (M2: graceful 403 handling for fork PRs)
     print("Fetching PR diff...")
-    diff = fetch_pr_diff(token, pr_event["repo"], pr_event["pr_number"])
+    try:
+        diff = fetch_pr_diff(token, pr_event["repo"], pr_event["pr_number"])
+    except Exception as exc:
+        print(f"::error::Failed to fetch PR diff: {exc}")
+        if "403" in str(exc):
+            print(
+                "::error::The token may lack access to this fork's diff. "
+                "Ensure the workflow has `pull_request_target` trigger or "
+                "the token has read access to the fork."
+            )
+        try:
+            failure_body = (
+                f"## \u274c Grippy Review \u2014 DIFF FETCH ERROR\n\n"
+                f"Could not fetch PR diff: `{exc}`\n\n"
+                f"{COMMENT_MARKER}"
+            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
+        except Exception:
+            pass  # Don't mask the original error
+        sys.exit(1)
     file_count = diff.count("diff --git")
     print(f"  {file_count} files, {len(diff)} chars")
 

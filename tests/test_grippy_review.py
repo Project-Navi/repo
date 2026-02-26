@@ -354,6 +354,46 @@ class TestFetchPrDiff:
             fetch_pr_diff("token", "org/repo", 999)
 
 
+# --- M2: fetch_pr_diff fork handling ---
+
+
+class TestFetchPrDiffForkHandling:
+    """Fork-specific scenarios for the raw diff endpoint."""
+
+    @patch("requests.get")
+    def test_403_raises_descriptive_error(self, mock_get: MagicMock) -> None:
+        """A 403 from the diff endpoint raises HTTPError (e.g., fork token lacks access)."""
+        from requests.exceptions import HTTPError
+
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.raise_for_status.side_effect = HTTPError(
+            "403 Forbidden", response=mock_response
+        )
+        mock_get.return_value = mock_response
+
+        with pytest.raises(HTTPError, match="403"):
+            fetch_pr_diff("fork-token", "upstream/repo", 99)
+
+    @patch("requests.get")
+    def test_successful_fork_diff(self, mock_get: MagicMock) -> None:
+        """Fork PRs return diff successfully when the token has access."""
+        mock_response = MagicMock()
+        mock_response.text = (
+            "diff --git a/lib.py b/lib.py\n--- a/lib.py\n+++ b/lib.py\n@@ -1 +1 @@\n-old\n+new"
+        )
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_pr_diff("fork-token", "upstream/repo", 55)
+
+        assert "diff --git" in result
+        mock_get.assert_called_once()
+        call_url = mock_get.call_args[0][0]
+        assert "upstream/repo" in call_url
+        assert "55" in call_url
+
+
 # --- C2: post_comment upserts instead of creating duplicates ---
 
 
