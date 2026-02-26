@@ -159,12 +159,17 @@ def _sanitize_path(s: str) -> tuple[str, bool]:
     return cleaned, cleaned != original
 
 
-def _sanitize_string(s: str, *, is_path: bool = False) -> str:
+def _sanitize_string(s: str, *, is_path: bool = False, escape_jinja: bool = True) -> str:
     """Apply the full sanitization pipeline to a single string.
 
     Order matters: null bytes → zero-width → NFKC → homoglyphs → jinja2 → path.
     Zero-width stripping before Jinja2 escaping prevents evasion via
     zero-width chars inserted between delimiters.
+
+    Args:
+        is_path: Apply path traversal sanitization.
+        escape_jinja: Escape Jinja2 delimiters. Set to False for manifest
+            dest paths which are legitimately Jinja2 templates (pack-controlled).
     """
     # 1. Null bytes
     s, had_nulls = _strip_null_bytes(s)
@@ -186,10 +191,11 @@ def _sanitize_string(s: str, *, is_path: bool = False) -> str:
     if glyph_count:
         logger.warning("Replaced %d homoglyph(s) in value", glyph_count)
 
-    # 5. Jinja2 delimiter escaping
-    s, had_jinja = _escape_jinja2(s)
-    if had_jinja:
-        logger.warning("Escaped template injection delimiter(s) in value")
+    # 5. Jinja2 delimiter escaping (skip for pack-controlled template paths)
+    if escape_jinja:
+        s, had_jinja = _escape_jinja2(s)
+        if had_jinja:
+            logger.warning("Escaped template injection delimiter(s) in value")
 
     # 6. Path traversal (only for path-like fields)
     if is_path:
@@ -276,6 +282,6 @@ def sanitize_manifest(manifest_data: dict[str, Any]) -> dict[str, Any]:
             if isinstance(entry, dict) and "dest" in entry:
                 dest = entry["dest"]
                 if isinstance(dest, str):
-                    entry["dest"] = _sanitize_string(dest, is_path=True)
+                    entry["dest"] = _sanitize_string(dest, is_path=True, escape_jinja=False)
 
     return manifest
