@@ -3,16 +3,7 @@ name: Grippy Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_dispatch:
-    inputs:
-      runner:
-        description: 'Runner to use'
-        required: false
-        default: 'ubuntu-latest'
-        type: choice
-        options:
-          - ubuntu-latest
-          - self-hosted
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -21,9 +12,7 @@ permissions:
 jobs:
   review:
     name: Grippy Code Review
-    # PR events always run on ubuntu-latest (cloud).
-    # Self-hosted runner (LM Studio over Tailscale) is workflow_dispatch only.
-    runs-on: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -38,7 +27,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ./grippy-data
-          key: grippy-data-${{ github.sha }}
+          key: grippy-data-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
+          restore-keys: |
+            grippy-data-${{ github.event.pull_request.number || 'manual' }}-
 
       - name: Install navi-bootstrap with grippy extras
         run: pip install ".[grippy,grippy-persistence]"

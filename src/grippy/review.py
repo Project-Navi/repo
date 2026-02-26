@@ -150,28 +150,40 @@ def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[
     def embed(texts: list[str]) -> list[list[float]]:
         from urllib.parse import urlparse
 
-        url = f"{base_url}/embeddings"
+        normalized_base = base_url.rstrip("/")
+        url = f"{normalized_base}/embeddings"
         headers: dict[str, str] = {}
         # Only send OPENAI_API_KEY to OpenAI hosts; use GRIPPY_API_KEY for others
-        parsed = urlparse(base_url)
+        parsed = urlparse(normalized_base)
         is_openai_host = parsed.hostname == "api.openai.com"
         openai_key = os.environ.get("OPENAI_API_KEY") or ""
         grippy_key = os.environ.get("GRIPPY_API_KEY") or ""
+        has_grippy_key = bool(grippy_key)
         if is_openai_host and openai_key:
             api_key = openai_key
+            auth_source = "OPENAI_API_KEY"
         elif grippy_key:
             api_key = grippy_key
+            auth_source = "GRIPPY_API_KEY"
         elif not is_openai_host and openai_key:
             # Don't leak OPENAI_API_KEY to non-OpenAI endpoints
             print(
-                f"::warning::OPENAI_API_KEY present but embedding endpoint is {base_url}. "
-                f"Set GRIPPY_API_KEY for non-OpenAI endpoints. Sending unauthenticated."
+                f"::warning::OPENAI_API_KEY present but embedding host is "
+                f"{parsed.hostname} (not api.openai.com). "
+                f"GRIPPY_API_KEY={'set' if has_grippy_key else 'unset'}. "
+                f"Sending unauthenticated."
             )
             api_key = ""
+            auth_source = "none"
         else:
             api_key = ""
+            auth_source = "none"
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        print(
+            f"::debug::Embedding auth: source={auth_source} "
+            f"host={parsed.hostname} is_openai={is_openai_host}"
+        )
         response = requests.post(
             url,
             json={"model": model, "input": texts},
