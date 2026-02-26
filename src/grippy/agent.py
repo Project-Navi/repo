@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from agno.agent import Agent
+from agno.models.openai import OpenAIChat
 from agno.models.openai.like import OpenAILike
 
 from grippy.prompts import load_identity, load_instructions
@@ -58,13 +60,16 @@ def create_reviewer(
     if additional_context is not None:
         kwargs["additional_context"] = additional_context
 
+    # Use native OpenAIChat when OPENAI_API_KEY is set (reads key from env),
+    # fall back to OpenAILike for local endpoints (LM Studio, etc.)
+    if os.environ.get("OPENAI_API_KEY"):
+        model = OpenAIChat(id=model_id)
+    else:
+        model = OpenAILike(id=model_id, api_key=api_key, base_url=base_url)
+
     return Agent(
         name="grippy",
-        model=OpenAILike(
-            id=model_id,
-            api_key=api_key,
-            base_url=base_url,
-        ),
+        model=model,
         description=load_identity(prompts_dir),
         instructions=load_instructions(prompts_dir, mode=mode),
         output_schema=GrippyReview,

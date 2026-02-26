@@ -6,9 +6,10 @@ Usage (GitHub Actions):
 Environment variables:
     GITHUB_TOKEN            — GitHub API token for fetching diff and posting comments
     GITHUB_EVENT_PATH       — path to PR event JSON (set by GitHub Actions)
-    GRIPPY_BASE_URL         — LM Studio / OpenAI-compatible endpoint
-    GRIPPY_MODEL_ID         — model identifier at the endpoint
-    GRIPPY_EMBEDDING_MODEL  — embedding model name at the same endpoint
+    OPENAI_API_KEY          — OpenAI API key (or unset for local endpoints)
+    GRIPPY_BASE_URL         — API endpoint (default: https://api.openai.com/v1)
+    GRIPPY_MODEL_ID         — model identifier (default: gpt-5.2)
+    GRIPPY_EMBEDDING_MODEL  — embedding model (default: text-embedding-3-large)
     GRIPPY_DATA_DIR         — persistent directory for graph DB + LanceDB
     GRIPPY_TIMEOUT          — seconds before review is killed (0 = no timeout)
     GITHUB_REPOSITORY       — owner/repo (set by GitHub Actions, fallback)
@@ -139,9 +140,14 @@ def make_embed_fn(
 
     def embed(texts: list[str]) -> list[list[float]]:
         url = f"{base_url}/embeddings"
+        headers: dict[str, str] = {}
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         response = requests.post(
             url,
             json={"model": model, "input": texts},
+            headers=headers,
             timeout=30,
         )
         response.raise_for_status()
@@ -307,8 +313,8 @@ def main() -> None:
     # Required env
     token = os.environ.get("GITHUB_TOKEN", "")
     event_path_str = os.environ.get("GITHUB_EVENT_PATH", "")
-    base_url = os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1")
-    model_id = os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512")
+    base_url = os.environ.get("GRIPPY_BASE_URL", "https://api.openai.com/v1")
+    model_id = os.environ.get("GRIPPY_MODEL_ID", "gpt-5.2")
     mode = os.environ.get("GRIPPY_MODE", "pr_review")
     timeout_seconds = int(os.environ.get("GRIPPY_TIMEOUT", "300"))
 
@@ -365,7 +371,7 @@ def main() -> None:
     # 3. Create agent and format context
     data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
     embedding_model = os.environ.get(
-        "GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b"
+        "GRIPPY_EMBEDDING_MODEL", "text-embedding-3-large"
     )
     data_dir = Path(data_dir_str)
     data_dir.mkdir(parents=True, exist_ok=True)
