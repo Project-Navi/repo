@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from agno.agent import Agent
 from agno.models.openai.like import OpenAILike
@@ -20,6 +21,11 @@ def create_reviewer(
     api_key: str = "lm-studio",
     prompts_dir: Path | str = DEFAULT_PROMPTS_DIR,
     mode: str = "pr_review",
+    # Phase 1 additions
+    db_path: Path | str | None = None,
+    session_id: str | None = None,
+    num_history_runs: int = 3,
+    additional_context: str | None = None,
 ) -> Agent:
     """Create a Grippy review agent.
 
@@ -29,11 +35,28 @@ def create_reviewer(
         api_key: API key (LM Studio accepts any non-empty string).
         prompts_dir: Directory containing Grippy's 21 markdown prompt files.
         mode: Review mode — pr_review, security_audit, governance_check, surprise_audit.
+        db_path: Path to SQLite file for session persistence. None = stateless.
+        session_id: Session ID for review continuity across runs.
+        num_history_runs: Number of prior runs to include in context (requires db).
+        additional_context: Extra context appended to the system message.
 
     Returns:
         Configured Agno Agent with Grippy's prompt chain and structured output schema.
     """
     prompts_dir = Path(prompts_dir)
+
+    # Build optional kwargs — only pass to Agent when configured
+    kwargs: dict[str, Any] = {}
+    if db_path is not None:
+        from agno.db.sqlite import SqliteDb
+
+        kwargs["db"] = SqliteDb(db_file=str(db_path))
+        kwargs["add_history_to_context"] = True
+        kwargs["num_history_runs"] = num_history_runs
+    if session_id is not None:
+        kwargs["session_id"] = session_id
+    if additional_context is not None:
+        kwargs["additional_context"] = additional_context
 
     return Agent(
         name="grippy",
@@ -46,6 +69,7 @@ def create_reviewer(
         instructions=load_instructions(prompts_dir, mode=mode),
         output_schema=GrippyReview,
         markdown=False,
+        **kwargs,
     )
 
 
