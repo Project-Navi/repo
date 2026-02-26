@@ -1,5 +1,7 @@
+{%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
 ---
-applyTo: "{{ spec.structure.src_dir | default('src') }}/**/security/**,{{ spec.structure.test_dir | default('tests') }}/test_security_*.py"
+applyTo: "{{ src }}/**/security/**,{{ tst }}/test_security_*.py"
 ---
 
 # Security Review Instructions

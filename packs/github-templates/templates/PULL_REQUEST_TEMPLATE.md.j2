@@ -1,3 +1,5 @@
+{%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
 ## Description
 <!-- Brief description of what this PR does -->
 
@@ -11,10 +13,10 @@
 - [ ] Breaking change
 
 ## Checklist
-- [ ] My code follows the project's style (`ruff check {{ spec.structure.src_dir | default("src") }}/ {{ spec.structure.test_dir | default("tests") }}/`)
+- [ ] My code follows the project's style (`ruff check {{ src }}/ {{ tst }}/`)
 - [ ] I have added tests for my changes
 - [ ] I have updated documentation if needed
-- [ ] All existing tests pass (`pytest {{ spec.structure.test_dir | default("tests") }}/ -v`)
+- [ ] All existing tests pass (`pytest {{ tst }}/ -v`)
 
 ## Related Issues
 <!-- Fixes #123, Related to #456 -->

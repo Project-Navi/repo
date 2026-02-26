@@ -1,4 +1,5 @@
 {%- set rel = spec.release | default({}) -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
 name: Reusable Build (SLSA L3)
 
 on:
@@ -49,7 +50,7 @@ jobs:
         run: uv sync
 
       - name: Run test suite
-        run: uv run pytest {{ spec.structure.test_dir | default("tests") }}/ -x -q
+        run: uv run pytest {{ tst }}/ -x -q
 
       - name: Generate SBOM (CycloneDX)
         run: uv run cyclonedx-py environment --output-format json -o sbom.cdx.json
