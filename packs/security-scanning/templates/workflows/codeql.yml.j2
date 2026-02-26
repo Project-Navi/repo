@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: {{ spec.recon.codeql_languages | default([spec.language]) | tojson }}
+        language: {{ spec.recon.codeql_languages | tojson if spec.recon is defined and spec.recon.codeql_languages is defined else [spec.language] | tojson }}
 
     steps:
       - name: Harden runner

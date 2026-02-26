@@ -16,6 +16,8 @@ from click.testing import CliRunner
 
 from navi_bootstrap.cli import cli
 
+PACKS_DIR = Path(__file__).parent.parent / "packs"
+
 
 @pytest.fixture
 def runner() -> CliRunner:
@@ -320,3 +322,273 @@ class TestSanitizePlanRenderComposition:
         # The name should be sanitized in output, not rendered as a template
         claude_md = (target / "CLAUDE.md").read_text()
         assert "malicious" not in claude_md or "\\{\\{" in claude_md
+
+
+# ---------------------------------------------------------------------------
+# Helpers for multi-pack tests
+# ---------------------------------------------------------------------------
+
+
+def _make_spec(tmp_path: Path, *, ci: bool = True) -> Path:
+    """Write a realistic spec and return its path."""
+    spec = {
+        "name": "integration-test",
+        "language": "python",
+        "python_version": "3.12",
+        "structure": {"src_dir": "src/integration_test", "test_dir": "tests"},
+        "features": {"ci": ci, "dependabot": True, "pre_commit": True},
+        "github": {"org": "test-org", "repo": "integration-test"},
+    }
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(spec))
+    return path
+
+
+def _apply_pack(runner: CliRunner, spec_path: Path, pack_name: str, target: Path) -> None:
+    """Apply a named pack and assert success."""
+    pack = PACKS_DIR / pack_name
+    result = runner.invoke(
+        cli,
+        [
+            "apply",
+            "--spec",
+            str(spec_path),
+            "--pack",
+            str(pack),
+            "--target",
+            str(target),
+            "--skip-resolve",
+        ],
+    )
+    assert result.exit_code == 0, f"apply {pack_name} failed: {result.output}"
+
+
+class TestMultiPackComposition:
+    """Apply base + elective packs in sequence — the real user journey."""
+
+    def test_base_then_elective_applies_cleanly(self, runner: CliRunner, tmp_path: Path) -> None:
+        """base → github-templates: sequential apply without conflict."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "github-templates", target)
+
+        # Base files exist
+        assert (target / "CLAUDE.md").exists()
+        # Elective files exist
+        assert (target / ".github" / "ISSUE_TEMPLATE" / "bug_report.yml").exists()
+        assert (target / ".github" / "PULL_REQUEST_TEMPLATE.md").exists()
+
+    def test_base_then_multiple_electives(self, runner: CliRunner, tmp_path: Path) -> None:
+        """base → security-scanning → review-system: three packs compose."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "security-scanning", target)
+        _apply_pack(runner, spec_path, "review-system", target)
+
+        # All three pack outputs coexist
+        assert (target / "CLAUDE.md").exists()
+        assert (target / ".github" / "workflows" / "codeql.yml").exists()
+        assert (target / ".grippy.yaml").exists()
+
+    def test_diff_clean_after_multi_pack_apply(self, runner: CliRunner, tmp_path: Path) -> None:
+        """base → github-templates → diff each: no drift after apply."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "github-templates", target)
+
+        # Diff base — should be clean
+        result = runner.invoke(
+            cli,
+            [
+                "diff",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0, f"base diff found drift:\n{result.output}"
+
+        # Diff github-templates — should be clean
+        result = runner.invoke(
+            cli,
+            [
+                "diff",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "github-templates"),
+                "--target",
+                str(target),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0, f"github-templates diff found drift:\n{result.output}"
+
+    def test_elective_without_base_still_works(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Elective packs don't hard-fail without base — they just render their own files."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        _apply_pack(runner, spec_path, "code-hygiene", target)
+        assert (target / "CONTRIBUTING.md").exists()
+
+    def test_all_packs_apply_without_recon(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Every pack handles missing spec.recon gracefully."""
+        spec_path = _make_spec(tmp_path, ci=True)
+        all_packs = [
+            "base",
+            "code-hygiene",
+            "github-templates",
+            "quality-gates",
+            "release-pipeline",
+            "review-system",
+            "security-scanning",
+        ]
+        for pack_name in all_packs:
+            target = tmp_path / f"project-{pack_name}"
+            target.mkdir()
+            _apply_pack(runner, spec_path, pack_name, target)
+
+
+class TestConditionalTemplates:
+    """Templates with conditions evaluate correctly against spec values."""
+
+    def test_security_scanning_with_ci_enabled(self, runner: CliRunner, tmp_path: Path) -> None:
+        """security-scanning templates render when spec.features.ci is true."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=True)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "security-scanning", target)
+
+        assert (target / ".github" / "workflows" / "codeql.yml").exists()
+        assert (target / ".github" / "workflows" / "scorecard.yml").exists()
+
+    def test_security_scanning_with_ci_disabled(self, runner: CliRunner, tmp_path: Path) -> None:
+        """security-scanning templates are skipped when spec.features.ci is false."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path, ci=False)
+
+        _apply_pack(runner, spec_path, "base", target)
+        _apply_pack(runner, spec_path, "security-scanning", target)
+
+        # Conditional templates should NOT be rendered
+        assert not (target / ".github" / "workflows" / "codeql.yml").exists()
+        assert not (target / ".github" / "workflows" / "scorecard.yml").exists()
+
+
+class TestGreenfieldRender:
+    """render (greenfield) pipeline with real packs."""
+
+    def test_render_base_pack_creates_project(self, runner: CliRunner, tmp_path: Path) -> None:
+        """render creates a new project directory from the base pack."""
+        spec_path = _make_spec(tmp_path)
+        out_dir = tmp_path / "new-project"
+
+        result = runner.invoke(
+            cli,
+            [
+                "render",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--out",
+                str(out_dir),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0, f"render failed: {result.output}"
+        assert (out_dir / "CLAUDE.md").exists()
+        assert (out_dir / ".pre-commit-config.yaml").exists()
+
+        # Verify content has real values
+        claude_md = (out_dir / "CLAUDE.md").read_text()
+        assert "integration-test" in claude_md
+        assert "{{" not in claude_md
+
+    def test_render_then_diff_is_clean(self, runner: CliRunner, tmp_path: Path) -> None:
+        """render → diff: freshly rendered project shows no drift."""
+        spec_path = _make_spec(tmp_path)
+        out_dir = tmp_path / "new-project"
+
+        runner.invoke(
+            cli,
+            [
+                "render",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--out",
+                str(out_dir),
+                "--skip-resolve",
+            ],
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "diff",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(PACKS_DIR / "base"),
+                "--target",
+                str(out_dir),
+                "--skip-resolve",
+            ],
+        )
+        assert result.exit_code == 0, f"diff found drift after render:\n{result.output}"
+
+
+class TestValidationComposition:
+    """Validation execution with --trust against real packs."""
+
+    def test_apply_with_trust_runs_validations(self, runner: CliRunner, tmp_path: Path) -> None:
+        """Packs with validations run them when --trust is passed."""
+        target = tmp_path / "project"
+        target.mkdir()
+        spec_path = _make_spec(tmp_path)
+
+        # Apply base first
+        _apply_pack(runner, spec_path, "base", target)
+
+        # Apply github-templates with --trust (has yaml validations)
+        pack = PACKS_DIR / "github-templates"
+        result = runner.invoke(
+            cli,
+            [
+                "apply",
+                "--spec",
+                str(spec_path),
+                "--pack",
+                str(pack),
+                "--target",
+                str(target),
+                "--skip-resolve",
+                "--trust",
+            ],
+        )
+        assert result.exit_code == 0, f"apply with trust failed: {result.output}"
+
+        # Should show validation results
+        manifest = yaml.safe_load((pack / "manifest.yaml").read_text())
+        if manifest.get("validation"):
+            assert "PASS" in result.output or "SKIP" in result.output

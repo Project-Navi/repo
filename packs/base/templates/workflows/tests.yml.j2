@@ -1,6 +1,7 @@
 {%- set pv = spec.python_version | default("3.12") -%}
 {%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
 {%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
+{%- set test_versions = spec.recon.python_test_versions if spec.recon is defined and spec.recon.python_test_versions is defined else [pv] -%}
 name: Tests
 
 on:
@@ -23,7 +24,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        python-version: {{ spec.recon.python_test_versions | default(["3.12"]) | tojson }}
+        python-version: {{ test_versions | tojson }}
 
     steps:
       - name: Harden runner
