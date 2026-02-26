@@ -1,0 +1,30 @@
+# Example: .github/workflows/grippy-review.yml
+# Install this in any repo to get Grippy AI code reviews on PRs.
+# Requires: self-hosted GPU runner with LM Studio reachable over Tailscale.
+
+name: Grippy Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Grippy Code Review
+    runs-on: [self-hosted, linux, x64, gpu]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Grippy
+        uses: Project-Navi/grippy-action@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          base-url: ${{ secrets.GRIPPY_BASE_URL }}
+          # model-id: devstral-small-2-24b-instruct-2512  # default
+          # mode: pr_review  # default

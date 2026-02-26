@@ -1,0 +1,69 @@
+name: 'Grippy Code Review'
+description: 'AI code review powered by Grippy — the reluctant code inspector. Runs on local LLM via LM Studio.'
+author: 'Project Navi'
+
+branding:
+  icon: 'eye'
+  color: 'orange'
+
+inputs:
+  github-token:
+    description: 'GitHub token for fetching PR diff and posting review comments'
+    required: true
+    default: ${{ github.token }}
+  base-url:
+    description: 'LM Studio / OpenAI-compatible API endpoint'
+    required: true
+  model-id:
+    description: 'Model identifier at the inference endpoint'
+    required: false
+    default: 'devstral-small-2-24b-instruct-2512'
+  mode:
+    description: 'Review mode — pr_review, security_audit, governance_check, surprise_audit'
+    required: false
+    default: 'pr_review'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+  navi-bootstrap-ref:
+    description: 'navi-bootstrap git ref to install (branch, tag, or commit SHA)'
+    required: false
+    default: 'main'
+
+outputs:
+  score:
+    description: 'Overall review score (0-100)'
+    value: ${{ steps.review.outputs.score }}
+  verdict:
+    description: 'Review verdict — PASS, FAIL, or PROVISIONAL'
+    value: ${{ steps.review.outputs.verdict }}
+  findings-count:
+    description: 'Number of findings'
+    value: ${{ steps.review.outputs.findings-count }}
+  merge-blocking:
+    description: 'Whether the review blocks merge (true/false)'
+    value: ${{ steps.review.outputs.merge-blocking }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install navi-bootstrap with grippy extras
+      shell: bash
+      run: |
+        pip install "navi-bootstrap[grippy] @ git+https://github.com/Project-Navi/repo.git@${{ inputs.navi-bootstrap-ref }}"
+
+    - name: Run Grippy review
+      id: review
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GRIPPY_BASE_URL: ${{ inputs.base-url }}
+        GRIPPY_MODEL_ID: ${{ inputs.model-id }}
+        GRIPPY_MODE: ${{ inputs.mode }}
+      run: python -m grippy.review

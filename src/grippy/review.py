@@ -208,6 +208,7 @@ def main() -> None:
     event_path_str = os.environ.get("GITHUB_EVENT_PATH", "")
     base_url = os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1")
     model_id = os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512")
+    mode = os.environ.get("GRIPPY_MODE", "pr_review")
 
     if not token:
         print("::error::GITHUB_TOKEN not set")
@@ -240,7 +241,7 @@ def main() -> None:
     agent = create_reviewer(
         model_id=model_id,
         base_url=base_url,
-        mode="pr_review",
+        mode=mode,
     )
 
     user_message = format_pr_context(
