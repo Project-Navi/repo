@@ -1,3 +1,4 @@
+{%- set rel = spec.release | default({}) -%}
 name: Reusable Build (SLSA L3)
 
 on:
@@ -7,7 +8,7 @@ on:
         required: true
         type: string
 {# Only declare the output if Docker is enabled #}
-{% if spec.release.has_docker | default(false) %}
+{% if rel.has_docker | default(false) %}
     outputs:
       image_digest:
         description: Docker image digest for attestation
@@ -103,7 +104,7 @@ jobs:
             licenses.csv
             licenses.txt
 
-{% if spec.release.has_docker | default(false) %}
+{% if rel.has_docker | default(false) %}
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20

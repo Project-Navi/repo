@@ -1,3 +1,4 @@
+{%- set gh = spec.github | default({}) -%}
 name: Feature Request
 description: Suggest a feature for {{ spec.name }}
 title: "[Feature]: "
@@ -37,9 +38,9 @@ body:
       label: Feature Category
       description: Select the category that best describes this feature.
       options:
-{% for cat in spec.github.feature_categories | default(["New Feature", "Enhancement", "Integration", "Developer Experience", "Documentation"]) -%}
+{%- for cat in gh.feature_categories | default(["New Feature", "Enhancement", "Integration", "Developer Experience", "Documentation"]) %}
         - {{ cat }}
-{% endfor %}
+{%- endfor %}
     validations:
       required: true
 

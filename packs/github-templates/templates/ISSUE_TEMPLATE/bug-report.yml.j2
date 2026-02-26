@@ -1,3 +1,4 @@
+{%- set gh = spec.github | default({}) -%}
 name: Bug Report
 description: Report a bug in {{ spec.name }}
 title: "[Bug]: "
@@ -58,9 +59,9 @@ body:
       label: Bug Category
       description: Select the category that best describes this bug.
       options:
-{% for cat in spec.github.bug_categories | default(["Bug", "Performance", "Security", "Documentation", "Developer Experience"]) -%}
+{%- for cat in gh.bug_categories | default(["Bug", "Performance", "Security", "Documentation", "Developer Experience"]) %}
         - {{ cat }}
-{% endfor %}
+{%- endfor %}
     validations:
       required: true
 
