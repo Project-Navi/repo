@@ -36,9 +36,7 @@ def full_pack(tmp_path: Path) -> Path:
         "hooks": [],
     }
     (pack_dir / "manifest.yaml").write_text(yaml.dump(manifest))
-    (templates_dir / "readme.md.j2").write_text(
-        "# {{ spec.name }}\n\n{{ spec.description }}\n"
-    )
+    (templates_dir / "readme.md.j2").write_text("# {{ spec.name }}\n\n{{ spec.description }}\n")
     return pack_dir
 
 
@@ -68,9 +66,7 @@ class TestValidateCommand:
         result = runner.invoke(cli, ["validate", "--spec", str(bad_spec)])
         assert result.exit_code != 0
 
-    def test_validate_with_pack(
-        self, runner: CliRunner, spec_file: Path, full_pack: Path
-    ) -> None:
+    def test_validate_with_pack(self, runner: CliRunner, spec_file: Path, full_pack: Path) -> None:
         result = runner.invoke(
             cli, ["validate", "--spec", str(spec_file), "--pack", str(full_pack)]
         )
@@ -86,9 +82,12 @@ class TestRenderCommand:
             cli,
             [
                 "render",
-                "--spec", str(spec_file),
-                "--pack", str(full_pack),
-                "--out", str(out_dir),
+                "--spec",
+                str(spec_file),
+                "--pack",
+                str(full_pack),
+                "--out",
+                str(out_dir),
                 "--skip-resolve",
             ],
         )
@@ -104,9 +103,12 @@ class TestRenderCommand:
             cli,
             [
                 "render",
-                "--spec", str(spec_file),
-                "--pack", str(full_pack),
-                "--out", str(out_dir),
+                "--spec",
+                str(spec_file),
+                "--pack",
+                str(full_pack),
+                "--out",
+                str(out_dir),
                 "--dry-run",
             ],
         )
@@ -123,9 +125,12 @@ class TestRenderCommand:
             cli,
             [
                 "render",
-                "--spec", str(spec_file),
-                "--pack", str(full_pack),
-                "--out", str(out_dir),
+                "--spec",
+                str(spec_file),
+                "--pack",
+                str(full_pack),
+                "--out",
+                str(out_dir),
                 "--skip-resolve",
             ],
         )
@@ -142,9 +147,12 @@ class TestApplyCommand:
             cli,
             [
                 "apply",
-                "--spec", str(spec_file),
-                "--pack", str(full_pack),
-                "--target", str(target_dir),
+                "--spec",
+                str(spec_file),
+                "--pack",
+                str(full_pack),
+                "--target",
+                str(target_dir),
                 "--skip-resolve",
             ],
         )
@@ -160,9 +168,12 @@ class TestApplyCommand:
             cli,
             [
                 "apply",
-                "--spec", str(spec_file),
-                "--pack", str(full_pack),
-                "--target", str(target_dir),
+                "--spec",
+                str(spec_file),
+                "--pack",
+                str(full_pack),
+                "--target",
+                str(target_dir),
                 "--dry-run",
             ],
         )

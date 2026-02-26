@@ -45,9 +45,7 @@ def validate(spec: Path, pack: Path | None) -> None:
 @click.option("--out", type=click.Path(path_type=Path), default=None)
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--skip-resolve", is_flag=True, default=False, help="Skip SHA resolution (offline)")
-def render_cmd(
-    spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_resolve: bool
-) -> None:
+def render_cmd(spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_resolve: bool) -> None:
     """Render a template pack into a new project (greenfield)."""
     try:
         spec_data = load_spec(spec)
@@ -64,9 +62,7 @@ def render_cmd(
     # Stage 0: Resolve SHAs
     action_shas_config = manifest.get("action_shas", [])
     try:
-        shas, versions = resolve_action_shas(
-            action_shas_config, skip=skip_resolve or dry_run
-        )
+        shas, versions = resolve_action_shas(action_shas_config, skip=skip_resolve or dry_run)
     except ResolveError as e:
         raise click.ClickException(str(e)) from e
 
@@ -113,9 +109,7 @@ def render_cmd(
 @click.option("--target", required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--dry-run", is_flag=True, default=False)
 @click.option("--skip-resolve", is_flag=True, default=False, help="Skip SHA resolution (offline)")
-def apply(
-    spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: bool
-) -> None:
+def apply(spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: bool) -> None:
     """Apply a template pack to an existing project."""
     try:
         spec_data = load_spec(spec)
@@ -130,9 +124,7 @@ def apply(
     # Stage 0: Resolve SHAs
     action_shas_config = manifest.get("action_shas", [])
     try:
-        shas, versions = resolve_action_shas(
-            action_shas_config, skip=skip_resolve or dry_run
-        )
+        shas, versions = resolve_action_shas(action_shas_config, skip=skip_resolve or dry_run)
     except ResolveError as e:
         raise click.ClickException(str(e)) from e
 

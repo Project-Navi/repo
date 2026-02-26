@@ -44,9 +44,7 @@ class TestRunValidations:
         assert results == []
 
     @patch("navi_bootstrap.validate.subprocess.run")
-    def test_skips_method_based_validations(
-        self, mock_run: MagicMock, tmp_path: Path
-    ) -> None:
+    def test_skips_method_based_validations(self, mock_run: MagicMock, tmp_path: Path) -> None:
         results = run_validations(
             [{"description": "SHA check", "method": "sha_verification"}],
             tmp_path,

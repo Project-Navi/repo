@@ -34,19 +34,23 @@ class TestValidateManifest:
 
     def test_template_missing_src_raises(self) -> None:
         with pytest.raises(ManifestError):
-            validate_manifest({
-                "name": "test",
-                "version": "0.1.0",
-                "templates": [{"dest": "out.txt"}],
-            })
+            validate_manifest(
+                {
+                    "name": "test",
+                    "version": "0.1.0",
+                    "templates": [{"dest": "out.txt"}],
+                }
+            )
 
     def test_invalid_mode_raises(self) -> None:
         with pytest.raises(ManifestError):
-            validate_manifest({
-                "name": "test",
-                "version": "0.1.0",
-                "templates": [{"src": "a.j2", "dest": "a.txt", "mode": "overwrite"}],
-            })
+            validate_manifest(
+                {
+                    "name": "test",
+                    "version": "0.1.0",
+                    "templates": [{"src": "a.j2", "dest": "a.txt", "mode": "overwrite"}],
+                }
+            )
 
     def test_agent_fields_accepted(self, valid_manifest: dict[str, Any]) -> None:
         valid_manifest["dependencies"] = ["base"]
@@ -61,9 +65,7 @@ class TestValidateManifest:
         validate_manifest(valid_manifest)  # should not raise
 
     def test_loops_accepted(self, valid_manifest: dict[str, Any]) -> None:
-        valid_manifest["loops"] = {
-            "module.py.j2": {"over": "spec.modules", "as": "module"}
-        }
+        valid_manifest["loops"] = {"module.py.j2": {"over": "spec.modules", "as": "module"}}
         validate_manifest(valid_manifest)  # should not raise
 
 
