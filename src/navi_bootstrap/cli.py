@@ -10,6 +10,7 @@ from navi_bootstrap.engine import plan, render
 from navi_bootstrap.hooks import run_hooks
 from navi_bootstrap.manifest import ManifestError, load_manifest
 from navi_bootstrap.resolve import ResolveError, resolve_action_shas
+from navi_bootstrap.sanitize import sanitize_manifest, sanitize_spec
 from navi_bootstrap.spec import SpecError, load_spec
 from navi_bootstrap.validate import run_validations
 
@@ -51,11 +52,13 @@ def render_cmd(spec: Path, pack: Path, out: Path | None, dry_run: bool, skip_res
         spec_data = load_spec(spec)
     except SpecError as e:
         raise click.ClickException(str(e)) from e
+    spec_data = sanitize_spec(spec_data)
 
     try:
         manifest = load_manifest(pack / "manifest.yaml")
     except ManifestError as e:
         raise click.ClickException(str(e)) from e
+    manifest = sanitize_manifest(manifest)
 
     output_dir = out or Path(spec_data["name"])
 
@@ -115,11 +118,13 @@ def apply(spec: Path, pack: Path, target: Path, dry_run: bool, skip_resolve: boo
         spec_data = load_spec(spec)
     except SpecError as e:
         raise click.ClickException(str(e)) from e
+    spec_data = sanitize_spec(spec_data)
 
     try:
         manifest = load_manifest(pack / "manifest.yaml")
     except ManifestError as e:
         raise click.ClickException(str(e)) from e
+    manifest = sanitize_manifest(manifest)
 
     # Stage 0: Resolve SHAs
     action_shas_config = manifest.get("action_shas", [])
