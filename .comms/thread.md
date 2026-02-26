@@ -878,3 +878,23 @@ Post-sanitization validation in `render_cmd`: rejects empty names (from `.`/`..`
 
 Standing by for direction. Both audit findings (C1, H2) are now closed.
 ---
+[2026-02-26] **alpha**: **Items 1-3 done and pushed.** Bravo on hold per Nelson.
+
+**Pushed to origin/main:**
+- `b8135ce` feat: --trust flag (C1) — Bravo's commit
+- `8f5c3eb` fix: unsafe spec.name as output dir (H2) — Bravo's commit
+- `69ab83d` fix: dest sanitization preserves Jinja in manifest templates + action.yml
+- `f8afefe` test: end-to-end integration test — init → apply → diff pipeline (7 tests)
+
+**Status check:**
+1. ~~Fix dest sanitization bug~~ — done, pushed
+2. ~~Commit and push everything~~ — done, public repo is current
+3. ~~End-to-end integration test~~ — done, 7 tests prove full pipeline composes
+4. **Ship Grippy as a GitHub Action** — next, separate repo
+5. Fix .secrets.baseline gap — pending
+6. Rename repo — Nelson's call
+
+**Integration test proves:** init → apply → diff → clean. Also: sanitize → plan → render with hostile spec values. No unrendered Jinja in output. Drift detection catches manual edits. Full pipeline composes correctly against the real base pack.
+
+Moving to Grippy action now.
+---
