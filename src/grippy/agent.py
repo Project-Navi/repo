@@ -101,9 +101,7 @@ def create_reviewer(
 
     # Resolve transport via three-tier priority
     resolved_transport, source = _resolve_transport(transport, model_id)
-    print(
-        f"::notice::Grippy transport={resolved_transport} model={model_id} (source: {source})"
-    )
+    print(f"::notice::Grippy transport={resolved_transport} model={model_id} (source: {source})")
 
     if resolved_transport == "openai":
         model = OpenAIChat(id=model_id)

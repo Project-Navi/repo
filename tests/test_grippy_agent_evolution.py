@@ -154,9 +154,7 @@ class TestTransportSelection:
 
     def test_explicit_local_transport(self) -> None:
         """transport='local' uses OpenAILike regardless of env."""
-        agent = create_reviewer(
-            prompts_dir=PROMPTS_DIR, transport="local"
-        )
+        agent = create_reviewer(prompts_dir=PROMPTS_DIR, transport="local")
         from agno.models.openai.like import OpenAILike
 
         assert isinstance(agent.model, OpenAILike)
@@ -164,9 +162,7 @@ class TestTransportSelection:
     @patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=False)
     def test_explicit_openai_transport(self) -> None:
         """transport='openai' uses OpenAIChat."""
-        agent = create_reviewer(
-            prompts_dir=PROMPTS_DIR, transport="openai"
-        )
+        agent = create_reviewer(prompts_dir=PROMPTS_DIR, transport="openai")
         from agno.models.openai import OpenAIChat
 
         assert isinstance(agent.model, OpenAIChat)

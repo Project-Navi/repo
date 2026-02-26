@@ -126,9 +126,7 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
     return result
 
 
-def make_embed_fn(
-    base_url: str, model: str
-) -> Callable[[list[str]], list[list[float]]]:
+def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[float]]]:
     """Create batch embedding function that calls LM Studio /v1/embeddings.
 
     Args:
@@ -373,9 +371,7 @@ def main() -> None:
 
     # 3. Create agent and format context
     data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
-    embedding_model = os.environ.get(
-        "GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b"
-    )
+    embedding_model = os.environ.get("GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b")
     data_dir = Path(data_dir_str)
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -426,9 +422,7 @@ def main() -> None:
                 f"Model: {model_id} at {base_url}\n\n"
                 f"{COMMENT_MARKER}"
             )
-            post_comment(
-                token, pr_event["repo"], pr_event["pr_number"], failure_body
-            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
