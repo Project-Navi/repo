@@ -57,9 +57,7 @@ def pack_with_loop(tmp_path: Path) -> Path:
         "hooks": [],
     }
     (pack_dir / "manifest.yaml").write_text(yaml.dump(manifest))
-    (templates_dir / "module.py.j2").write_text(
-        '"""{{ item.name }}: {{ item.description }}"""\n'
-    )
+    (templates_dir / "module.py.j2").write_text('"""{{ item.name }}: {{ item.description }}"""\n')
     return pack_dir
 
 
@@ -127,6 +125,40 @@ class TestPlan:
         result = plan(manifest, minimal_spec, pack_with_condition / "templates")
         dest_paths = [e.dest for e in result.entries]
         assert "conditional.txt" not in dest_paths
+
+    def test_plan_negated_condition_includes_when_falsy(
+        self, pack_with_condition: Path, minimal_spec: dict[str, Any]
+    ) -> None:
+        """! prefix negates: include when dotpath is falsy."""
+        manifest = yaml.safe_load((pack_with_condition / "manifest.yaml").read_text())
+        manifest["conditions"]["conditional.txt.j2"] = "!spec.features.docker"
+        minimal_spec["features"]["docker"] = False
+        (pack_with_condition / "manifest.yaml").write_text(yaml.dump(manifest))
+        result = plan(manifest, minimal_spec, pack_with_condition / "templates")
+        dest_paths = [e.dest for e in result.entries]
+        assert "conditional.txt" in dest_paths
+
+    def test_plan_negated_condition_skips_when_truthy(
+        self, pack_with_condition: Path, minimal_spec: dict[str, Any]
+    ) -> None:
+        """! prefix negates: skip when dotpath is truthy."""
+        manifest = yaml.safe_load((pack_with_condition / "manifest.yaml").read_text())
+        manifest["conditions"]["conditional.txt.j2"] = "!spec.features.ci"
+        (pack_with_condition / "manifest.yaml").write_text(yaml.dump(manifest))
+        result = plan(manifest, minimal_spec, pack_with_condition / "templates")
+        dest_paths = [e.dest for e in result.entries]
+        assert "conditional.txt" not in dest_paths
+
+    def test_plan_negated_condition_missing_path_is_truthy(
+        self, pack_with_condition: Path, minimal_spec: dict[str, Any]
+    ) -> None:
+        """!spec.nonexistent.path → falsy value → negated = True → include."""
+        manifest = yaml.safe_load((pack_with_condition / "manifest.yaml").read_text())
+        manifest["conditions"]["conditional.txt.j2"] = "!spec.recon.existing_tools.ruff"
+        (pack_with_condition / "manifest.yaml").write_text(yaml.dump(manifest))
+        result = plan(manifest, minimal_spec, pack_with_condition / "templates")
+        dest_paths = [e.dest for e in result.entries]
+        assert "conditional.txt" in dest_paths
 
     def test_plan_expands_loops(
         self, pack_with_loop: Path, spec_with_modules: dict[str, Any]

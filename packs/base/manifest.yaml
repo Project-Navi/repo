@@ -11,6 +11,7 @@ version: "0.1.0"
 conditions:
   "workflows/tests.yml.j2": "spec.features.ci"
   "pre-commit-config.yaml.j2": "spec.features.pre_commit"
+  "pyproject-tools.toml.j2": "!spec.recon.existing_tools.ruff"
 
 loops: {}
 

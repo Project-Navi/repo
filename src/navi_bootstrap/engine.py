@@ -55,10 +55,17 @@ def _resolve_dotpath(obj: Any, path: str) -> Any:
 
 
 def _eval_condition(condition_expr: str, spec: dict[str, Any]) -> bool:
-    """Evaluate a dotpath condition expression against spec context."""
+    """Evaluate a dotpath condition expression against spec context.
+
+    Supports negation with '!' prefix: "!spec.recon.existing_tools.ruff"
+    evaluates to True when the dotpath is falsy.
+    """
+    negate = condition_expr.startswith("!")
+    path = condition_expr.lstrip("!")
     context = {"spec": spec}
-    value = _resolve_dotpath(context, condition_expr)
-    return bool(value)
+    value = _resolve_dotpath(context, path)
+    result = bool(value)
+    return not result if negate else result
 
 
 def _render_dest_path(dest_template: str, context: dict[str, Any]) -> str:
@@ -204,9 +211,7 @@ def write_rendered(
             _write_append(output_path, rf.content, pack_name)
         else:
             if mode == "greenfield" and output_path.exists():
-                raise FileExistsError(
-                    f"File already exists (greenfield mode): {output_path}"
-                )
+                raise FileExistsError(f"File already exists (greenfield mode): {output_path}")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(rf.content)
 

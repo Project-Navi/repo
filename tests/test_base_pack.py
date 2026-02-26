@@ -299,3 +299,31 @@ class TestBasePackRender:
         assert '"3.10"' in ci_content
         assert '"3.11"' in ci_content
         assert '"3.12"' in ci_content
+
+    def test_pyproject_tools_skipped_when_ruff_exists(
+        self,
+        base_spec: dict[str, Any],
+        fake_shas: dict[str, str],
+        fake_versions: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        """When recon says ruff already configured, pyproject-tools is skipped."""
+        base_spec["recon"]["existing_tools"]["ruff"] = True
+        manifest = load_manifest(PACK_DIR / "manifest.yaml")
+        templates_dir = PACK_DIR / "templates"
+        render_plan = plan(manifest, base_spec, templates_dir)
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        (output_dir / "pyproject.toml").write_text('[project]\nname = "arctl"\n')
+        render(
+            render_plan,
+            base_spec,
+            templates_dir,
+            output_dir,
+            mode="apply",
+            action_shas=fake_shas,
+            action_versions=fake_versions,
+        )
+        content = (output_dir / "pyproject.toml").read_text()
+        # Should NOT have nboot markers — template was skipped
+        assert "# --- nboot: base ---" not in content
