@@ -1,0 +1,76 @@
+name: OpenSSF Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "15 6 * * 1"  # Monday 06:15 UTC
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: scorecard
+  cancel-in-progress: false
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      id-token: write
+      contents: write
+      actions: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+        with:
+          token: {% raw %}${{ secrets.SCORECARD_TOKEN }}{% endraw %}
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@{{ action_shas.scorecard_action }}  # {{ action_versions.scorecard_action }}
+        with:
+          repo_token: {% raw %}${{ secrets.SCORECARD_TOKEN }}{% endraw %}
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: {{ spec.recon.scorecard_publish | default(false) | tojson }}
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@{{ action_shas.codeql_action }}  # {{ action_versions.codeql_action }}
+        with:
+          sarif_file: results.sarif
+
+      - name: Run Scorecard (JSON)
+        uses: ossf/scorecard-action@{{ action_shas.scorecard_action }}  # {{ action_versions.scorecard_action }}
+        with:
+          repo_token: {% raw %}${{ secrets.SCORECARD_TOKEN }}{% endraw %}
+          results_file: results.json
+          results_format: json
+          publish_results: {{ spec.recon.scorecard_publish | default(false) | tojson }}
+
+      - name: Generate badge
+        run: |
+          SCORE=$(jq -r '.score' results.json)
+          SCORE_INT=${SCORE%.*}
+          if [ "$SCORE_INT" -ge 8 ]; then COLOR=brightgreen
+          elif [ "$SCORE_INT" -ge 6 ]; then COLOR=green
+          elif [ "$SCORE_INT" -ge 4 ]; then COLOR=yellowgreen
+          else COLOR=red; fi
+          mkdir -p .github/badges
+          curl -sf "https://img.shields.io/badge/openssf_scorecard-${SCORE}-${COLOR}" -o .github/badges/scorecard.svg
+
+      - name: Commit badge
+        run: |
+          git add .github/badges/scorecard.svg
+          git diff --cached --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "ci: update scorecard badge [skip ci]"
+          git pull --rebase
+          git push || echo "::warning::Scorecard badge push failed -- will retry on next run"
