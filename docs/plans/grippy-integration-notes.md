@@ -47,7 +47,7 @@ The full Grippy orchestrator (webhook → queue → router → agent loop → po
 
 ## Resolved: Local-First Architecture
 
-**Grippy ships local-first.** Devstral Q8 (64k context) on Ollama/LMStudio is the default runtime — no cloud API required. The 21 prompt files are engineered to constrain a local model into structured output, and the confidence filter catches the rest.
+**Grippy ships local-first.** Devstral Q6 (64k context) on Ollama/LMStudio is the default runtime — no cloud API required. Q6 is the target quant for the 3090 24GB reference hardware. The 21 prompt files are engineered to constrain a local model into structured output, and the five-stage confidence filter catches drift from the weaker quant.
 
 This means:
 - The review-system pack templates `.grippy.yaml` with local model config (Ollama endpoint, model name, context window)

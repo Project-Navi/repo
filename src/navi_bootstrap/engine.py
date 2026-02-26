@@ -28,6 +28,21 @@ class RenderPlan:
     pack_name: str = ""
 
 
+@dataclass
+class RenderedFile:
+    """A rendered file — content in memory, not yet written to disk.
+
+    This dataclass is the boundary between the pure render stage (stateless,
+    side-effect-free) and the write stage (filesystem). Designed so that
+    stages 0-3 can run in a Cloudflare Worker or similar edge runtime that
+    returns rendered content without touching a filesystem.
+    """
+
+    dest: str  # relative output path
+    content: str  # rendered template content
+    mode: str = "create"  # "create" or "append"
+
+
 def _resolve_dotpath(obj: Any, path: str) -> Any:
     """Resolve a dotpath like 'spec.features.ci' against a nested dict."""
     current = obj
@@ -98,6 +113,44 @@ def plan(
     return render_plan
 
 
+def render_to_files(
+    render_plan: RenderPlan,
+    spec: dict[str, Any],
+    templates_dir: Path,
+    *,
+    action_shas: dict[str, str] | None = None,
+    action_versions: dict[str, str] | None = None,
+) -> list[RenderedFile]:
+    """Stage 3 (pure): Render templates to memory. No filesystem side effects.
+
+    Returns a list of RenderedFile with (dest, content, mode). The caller
+    decides what to do with them — write to disk, return via HTTP, etc.
+    """
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(templates_dir)),
+        undefined=jinja2.StrictUndefined,
+        keep_trailing_newline=True,
+    )
+
+    context: dict[str, Any] = {
+        "spec": spec,
+        "action_shas": action_shas or {},
+        "action_versions": action_versions or {},
+    }
+
+    results: list[RenderedFile] = []
+
+    for entry in render_plan.entries:
+        template = env.get_template(entry.src)
+        render_context = {**context, **entry.extra_context}
+        rendered = template.render(**render_context)
+        results.append(RenderedFile(dest=entry.dest, content=rendered, mode=entry.mode))
+
+    return results
+
+
+# --- Filesystem write layer (Stage 3b) ---
+
 # Marker block pattern
 _MARKER_START = "# --- nboot: {pack_name} ---"
 _MARKER_END = "# --- end nboot: {pack_name} ---"
@@ -130,6 +183,38 @@ def _write_append(output_path: Path, rendered: str, pack_name: str) -> None:
         output_path.write_text(block)
 
 
+def write_rendered(
+    rendered_files: list[RenderedFile],
+    output_dir: Path,
+    pack_name: str,
+    *,
+    mode: str = "apply",
+) -> list[Path]:
+    """Write rendered files to disk. Handles append markers and greenfield checks.
+
+    mode: "greenfield" (fail if non-append files exist) or "apply" (create/append).
+    Returns list of written file paths.
+    """
+    written: list[Path] = []
+
+    for rf in rendered_files:
+        output_path = output_dir / rf.dest
+
+        if rf.mode == "append":
+            _write_append(output_path, rf.content, pack_name)
+        else:
+            if mode == "greenfield" and output_path.exists():
+                raise FileExistsError(
+                    f"File already exists (greenfield mode): {output_path}"
+                )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(rf.content)
+
+        written.append(output_path)
+
+    return written
+
+
 def render(
     render_plan: RenderPlan,
     spec: dict[str, Any],
@@ -140,42 +225,16 @@ def render(
     action_shas: dict[str, str] | None = None,
     action_versions: dict[str, str] | None = None,
 ) -> list[Path]:
-    """Stage 3: Render all templates from the plan.
+    """Stage 3 (convenience): Render templates and write to disk.
 
-    mode: "greenfield" (fail if non-append files exist) or "apply" (create/append).
-    Returns list of written file paths.
+    Combines render_to_files() + write_rendered() for the common case.
+    For edge/stateless usage, call render_to_files() directly.
     """
-    env = jinja2.Environment(
-        loader=jinja2.FileSystemLoader(str(templates_dir)),
-        undefined=jinja2.StrictUndefined,
-        keep_trailing_newline=True,
+    rendered_files = render_to_files(
+        render_plan,
+        spec,
+        templates_dir,
+        action_shas=action_shas,
+        action_versions=action_versions,
     )
-
-    context: dict[str, Any] = {
-        "spec": spec,
-        "action_shas": action_shas or {},
-        "action_versions": action_versions or {},
-    }
-
-    written: list[Path] = []
-
-    for entry in render_plan.entries:
-        template = env.get_template(entry.src)
-        render_context = {**context, **entry.extra_context}
-        rendered = template.render(**render_context)
-
-        output_path = output_dir / entry.dest
-
-        if entry.mode == "append":
-            _write_append(output_path, rendered, render_plan.pack_name)
-        else:
-            if mode == "greenfield" and output_path.exists():
-                raise FileExistsError(
-                    f"File already exists (greenfield mode): {output_path}"
-                )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(rendered)
-
-        written.append(output_path)
-
-    return written
+    return write_rendered(rendered_files, output_dir, render_plan.pack_name, mode=mode)
