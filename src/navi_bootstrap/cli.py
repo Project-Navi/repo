@@ -70,7 +70,16 @@ def render_cmd(
         raise click.ClickException(str(e)) from e
     manifest = sanitize_manifest(manifest)
 
-    output_dir = out or Path(spec_data["name"])
+    if out is None:
+        name = spec_data["name"]
+        if not name or "/" in name or "\\" in name:
+            raise click.ClickException(
+                f"Unsafe spec name {name!r} cannot be used as output directory. "
+                "Use --out to specify an explicit output path."
+            )
+        output_dir = Path(name)
+    else:
+        output_dir = out
 
     # Stage 0: Resolve SHAs
     action_shas_config = manifest.get("action_shas", [])
