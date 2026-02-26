@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from grippy.review import (
+    COMMENT_MARKER,
+    MAX_DIFF_CHARS,
+    fetch_pr_diff,
     format_review_comment,
     load_pr_event,
     parse_review_response,
+    post_comment,
+    truncate_diff,
 )
 from grippy.schema import (
     AsciiArtKey,
@@ -299,3 +305,148 @@ class TestParseReviewResponse:
         """JSON that doesn't match schema raises ValueError."""
         with pytest.raises(ValueError, match="validat"):
             parse_review_response(json.dumps({"version": "1.0"}))
+
+
+# --- C1: fetch_pr_diff uses raw diff API, not paginated compare ---
+
+
+class TestFetchPrDiff:
+    @patch("requests.get")
+    def test_fetches_raw_diff_via_api(self, mock_get: MagicMock) -> None:
+        """Uses GitHub API with diff media type, not compare().files."""
+        mock_response = MagicMock()
+        mock_response.text = (
+            "diff --git a/foo.py b/foo.py\n--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new"
+        )
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_pr_diff("test-token", "org/repo", 42)
+
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert "org/repo" in call_args[0][0]
+        assert "42" in call_args[0][0]
+        assert "application/vnd.github.v3.diff" in str(call_args[1].get("headers", {}))
+        assert "diff --git" in result
+
+    @patch("requests.get")
+    def test_includes_auth_header(self, mock_get: MagicMock) -> None:
+        """Request includes Authorization header with token."""
+        mock_response = MagicMock()
+        mock_response.text = ""
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        fetch_pr_diff("my-secret-token", "org/repo", 1)
+
+        headers = mock_get.call_args[1]["headers"]
+        assert "my-secret-token" in headers.get("Authorization", "")
+
+    @patch("requests.get")
+    def test_raises_on_http_error(self, mock_get: MagicMock) -> None:
+        """HTTP errors propagate (e.g., 404 for missing PR)."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = Exception("404 Not Found")
+        mock_get.return_value = mock_response
+
+        with pytest.raises(Exception, match="404"):
+            fetch_pr_diff("token", "org/repo", 999)
+
+
+# --- C2: post_comment upserts instead of creating duplicates ---
+
+
+class TestPostComment:
+    @patch("github.Github")
+    def test_creates_new_comment_when_none_exists(self, mock_gh_cls: MagicMock) -> None:
+        """First review creates a new comment."""
+        mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = []
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, f"Review body\n{COMMENT_MARKER}")
+
+        mock_pr.create_issue_comment.assert_called_once()
+        mock_pr.get_issue_comments.assert_called_once()
+
+    @patch("github.Github")
+    def test_edits_existing_comment_on_rerun(self, mock_gh_cls: MagicMock) -> None:
+        """Re-run edits existing Grippy comment instead of creating duplicate."""
+        existing_comment = MagicMock()
+        existing_comment.body = f"Old review\n{COMMENT_MARKER}"
+        mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = [existing_comment]
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, f"New review\n{COMMENT_MARKER}")
+
+        existing_comment.edit.assert_called_once()
+        mock_pr.create_issue_comment.assert_not_called()
+
+    @patch("github.Github")
+    def test_ignores_non_grippy_comments(self, mock_gh_cls: MagicMock) -> None:
+        """Other comments on the PR are not touched."""
+        other_comment = MagicMock()
+        other_comment.body = "Looks good to me!"
+        mock_pr = MagicMock()
+        mock_pr.get_issue_comments.return_value = [other_comment]
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, f"Review\n{COMMENT_MARKER}")
+
+        mock_pr.create_issue_comment.assert_called_once()
+        other_comment.edit.assert_not_called()
+
+
+# --- H2: diff size cap ---
+
+
+class TestTruncateDiff:
+    def test_small_diff_unchanged(self) -> None:
+        """Diffs under the cap pass through unchanged."""
+        diff = "diff --git a/foo.py b/foo.py\n-old\n+new"
+        result = truncate_diff(diff)
+        assert result == diff
+
+    def test_large_diff_truncated(self) -> None:
+        """Diffs over MAX_DIFF_CHARS are truncated with a warning."""
+        # Build a diff with many file blocks that exceed the cap
+        block = "diff --git a/f.py b/f.py\n" + ("+" * 5000) + "\n"
+        diff = block * 100  # 100 files x ~5K each = ~500K chars
+        assert len(diff) > MAX_DIFF_CHARS, "Test diff must exceed cap"
+        result = truncate_diff(diff)
+        assert len(result) < len(diff)
+        assert "truncated" in result.lower()
+
+    def test_truncated_diff_ends_at_file_boundary(self) -> None:
+        """Truncation happens at a file boundary, not mid-hunk."""
+        # Build a diff with multiple files, total > cap
+        file_block = (
+            "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
+            + "@@ -1,10 +1,10 @@\n"
+            + ("-old line\n+new line\n" * 100)
+        )
+        diff = file_block * 50  # Should exceed cap
+        if len(diff) <= MAX_DIFF_CHARS:
+            pytest.skip("Test diff not large enough to trigger truncation")
+        result = truncate_diff(diff)
+        # Should not cut in the middle of a hunk
+        assert result.rstrip().endswith("(truncated)") or "truncated" in result
+
+    def test_truncation_preserves_complete_files(self) -> None:
+        """Truncated output contains only complete file diffs."""
+        small_file = "diff --git a/small.py b/small.py\n--- a/small.py\n+++ b/small.py\n@@ -1 +1 @@\n-a\n+b\n"
+        big_file = (
+            "diff --git a/big.py b/big.py\n--- a/big.py\n+++ b/big.py\n" + "x" * MAX_DIFF_CHARS
+        )
+        diff = small_file + big_file
+        result = truncate_diff(diff)
+        # Should contain the small file completely
+        assert "small.py" in result

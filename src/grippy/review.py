@@ -21,6 +21,12 @@ from typing import Any
 
 from grippy.schema import GrippyReview
 
+# Marker embedded in every Grippy comment — used for upsert (C2 fix)
+COMMENT_MARKER = "<!-- grippy-review -->"
+
+# Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
+MAX_DIFF_CHARS = 200_000
+
 
 def load_pr_event(event_path: Path) -> dict[str, Any]:
     """Parse GitHub Actions pull_request event payload.
@@ -77,6 +83,36 @@ def parse_review_response(content: Any) -> GrippyReview:
             raise ValueError(msg) from exc
     msg = f"Unexpected response type: {type(content).__name__}"
     raise ValueError(msg)
+
+
+def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
+    """Truncate diff at file boundaries if it exceeds max_chars.
+
+    Splits on 'diff --git' markers and includes complete files until the
+    budget is exhausted. Appends a truncation warning.
+    """
+    if len(diff) <= max_chars:
+        return diff
+
+    # Split into per-file blocks
+    parts = diff.split("diff --git ")
+    # First element is empty or preamble
+    preamble = parts[0]
+    file_blocks = [f"diff --git {p}" for p in parts[1:]]
+
+    kept: list[str] = []
+    total = len(preamble)
+    for block in file_blocks:
+        if total + len(block) > max_chars and kept:
+            break
+        kept.append(block)
+        total += len(block)
+
+    truncated_count = len(file_blocks) - len(kept)
+    result = preamble + "".join(kept)
+    if truncated_count > 0:
+        result += f"\n\n... {truncated_count} file(s) truncated (diff exceeded {max_chars} chars) (truncated)"
+    return result
 
 
 def format_review_comment(review: GrippyReview) -> str:
@@ -154,41 +190,50 @@ def format_review_comment(review: GrippyReview) -> str:
         f"Complexity: {review.pr.complexity_tier.value}</sub>"
     )
 
+    # Hidden marker for upsert detection
+    lines.append("")
+    lines.append(COMMENT_MARKER)
+
     return "\n".join(lines)
 
 
 def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
-    """Fetch PR diff via PyGithub.
+    """Fetch complete PR diff via GitHub API raw diff endpoint.
 
-    Returns:
-        The unified diff as a string.
+    Uses Accept: application/vnd.github.v3.diff to get the full unified
+    diff in a single request — no pagination issues (C1 fix).
     """
-    from github import Github  # type: ignore[import-not-found]
+    import requests  # type: ignore[import-untyped]
 
-    gh = Github(token)
-    repository = gh.get_repo(repo)
-    pr = repository.get_pull(pr_number)
-
-    # Get diff by fetching the compare URL
-    comparison = repository.compare(pr.base.sha, pr.head.sha)
-    # Build diff from file patches
-    parts: list[str] = []
-    for f in comparison.files:
-        if f.patch:
-            parts.append(f"diff --git a/{f.filename} b/{f.filename}")
-            parts.append(f"--- a/{f.filename}")
-            parts.append(f"+++ b/{f.filename}")
-            parts.append(f.patch)
-    return "\n".join(parts)
+    url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3.diff",
+    }
+    response = requests.get(url, headers=headers, timeout=60)
+    response.raise_for_status()
+    return response.text
 
 
 def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
-    """Post a comment on a PR via PyGithub."""
+    """Post or update a Grippy review comment on a PR.
+
+    Searches for an existing comment containing COMMENT_MARKER and edits
+    it instead of creating a duplicate (C2 fix).
+    """
     from github import Github
 
     gh = Github(token)
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
+
+    # Look for existing Grippy comment to edit
+    for comment in pr.get_issue_comments():
+        if COMMENT_MARKER in comment.body:
+            comment.edit(body)
+            return
+
+    # No existing comment — create new
     pr.create_issue_comment(body)
 
 
@@ -233,7 +278,13 @@ def main() -> None:
     # 2. Fetch diff
     print("Fetching PR diff...")
     diff = fetch_pr_diff(token, pr_event["repo"], pr_event["pr_number"])
-    print(f"  {diff.count('diff --git')} files, {len(diff)} chars")
+    file_count = diff.count("diff --git")
+    print(f"  {file_count} files, {len(diff)} chars")
+
+    # H2: cap diff size to avoid overflowing LLM context
+    diff = truncate_diff(diff)
+    if len(diff) < file_count:
+        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars")
 
     # 3. Create agent and format context
     from grippy.agent import create_reviewer, format_pr_context
@@ -252,12 +303,43 @@ def main() -> None:
         diff=diff,
     )
 
-    # 4. Run review
+    # 4. Run review (H1: error handling around LLM call)
     print(f"Running review (model={model_id}, endpoint={base_url})...")
-    run_output = agent.run(user_message)
+    try:
+        run_output = agent.run(user_message)
+    except Exception as exc:
+        print(f"::error::Grippy agent failed: {exc}")
+        # Post a failure comment so the PR author knows
+        try:
+            failure_body = (
+                f"## ❌ Grippy Review — ERROR\n\n"
+                f"Review agent failed: `{exc}`\n\n"
+                f"Model: {model_id} at {base_url}\n\n"
+                f"{COMMENT_MARKER}"
+            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
+        except Exception:
+            pass  # Don't mask the original error
+        sys.exit(1)
 
-    # 5. Parse response
-    review = parse_review_response(run_output.content)
+    # 5. Parse response (H1: error handling around parse)
+    try:
+        review = parse_review_response(run_output.content)
+    except ValueError as exc:
+        print(f"::error::Failed to parse review response: {exc}")
+        raw_preview = str(run_output.content)[:500]
+        try:
+            failure_body = (
+                f"## ❌ Grippy Review — PARSE ERROR\n\n"
+                f"Could not parse LLM response as GrippyReview.\n\n"
+                f"```\n{raw_preview}\n```\n\n"
+                f"{COMMENT_MARKER}"
+            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
+        except Exception:
+            pass
+        sys.exit(1)
+
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
