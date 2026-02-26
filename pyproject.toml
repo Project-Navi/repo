@@ -30,6 +30,10 @@ dependencies = [
 grippy = [
     "agno[openai]>=1.1.0",
     "pydantic>=2.0.0",
+    "PyGithub>=2.1.0",
+]
+grippy-persistence = [
+    "lancedb>=0.20.0",
 ]
 
 [project.scripts]
@@ -43,6 +47,7 @@ dev = [
     "mypy>=1.8.0",
     "bandit>=1.7.0",
     "agno[openai]>=1.1.0",
+    "lancedb>=0.20.0",
     "types-jsonschema>=4.20.0",
     "types-PyYAML>=6.0",
 ]
