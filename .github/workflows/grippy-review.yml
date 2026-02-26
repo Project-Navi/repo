@@ -1,0 +1,49 @@
+name: Grippy Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Grippy Code Review
+    runs-on: [self-hosted, linux, x64, gpu]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install navi-bootstrap with grippy extras
+        run: pip install ".[grippy]"
+
+      - name: Run Grippy review
+        id: review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GRIPPY_BASE_URL: ${{ secrets.GRIPPY_BASE_URL }}
+          GRIPPY_MODEL_ID: ${{ secrets.GRIPPY_MODEL_ID }}
+        run: python -m grippy.review
+
+      - name: Review summary
+        if: always()
+        env:
+          REVIEW_SCORE: ${{ steps.review.outputs.score }}
+          REVIEW_VERDICT: ${{ steps.review.outputs.verdict }}
+          REVIEW_FINDINGS: ${{ steps.review.outputs.findings-count }}
+          REVIEW_BLOCKING: ${{ steps.review.outputs.merge-blocking }}
+        run: |
+          echo "### Grippy Review Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Score: $REVIEW_SCORE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verdict: $REVIEW_VERDICT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Findings: $REVIEW_FINDINGS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Merge blocking: $REVIEW_BLOCKING" >> "$GITHUB_STEP_SUMMARY"
