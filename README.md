@@ -66,7 +66,7 @@ Grippy is navi-bootstrap's AI code reviewer — a prompt-only framework (21 mark
 
 - **Local-first.** Runs on Devstral via LM Studio or Ollama. Your code never leaves your network.
 - **Structured output.** Every review produces Pydantic-validated JSON: findings with severity, confidence, evidence, and suggestions. 14 nested models, enum-constrained fields, no freeform text to parse.
-- **Validated.** Devstral Q4 (24b) passed structured output validation on first attempt against a real 250-line, 6-file diff with the full 7-file prompt chain.
+- **Validated.** Devstral Q4 (24b) passed structured output validation on first attempt against a real 250-line, 6-file diff with the full 7-file prompt chain. Raw output at [`docs/validation/`](docs/validation/).
 
 ```python
 from grippy.agent import create_reviewer, format_pr_context
