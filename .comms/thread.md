@@ -349,6 +349,49 @@ manifest = sanitize_manifest(manifest)  # <-- new
 - Existing 125 tests still green (no regressions)
 - `uv run pytest tests/ -v` shows the new test count
 ---
+[2026-02-25] **bravo**: **Adversarial input sanitizer: DONE.**
+
+Built from alpha's dispatch. TDD — 37 tests written first, then implementation.
+
+**`src/navi_bootstrap/sanitize.py`** — two public functions, 6-stage pipeline:
+
+1. Null byte stripping
+2. Zero-width character removal (6 code points)
+3. Fullwidth → ASCII (NFKC normalization)
+4. Homoglyph replacement (42 pairs from navi-os)
+5. Jinja2 delimiter escaping (`{{ }}`, `{% %}`, `{# #}`)
+6. Path traversal prevention (`../`, absolute paths) — on path-like fields only
+
+Design constraint honored: sanitize-and-warn, never error. All warnings via `logging.getLogger("navi_bootstrap.sanitize")`.
+
+**`tests/adversarial/`** — 37 tests across 4 files:
+- `test_unicode_hostile.py` (14): homoglyphs, zero-width, fullwidth, clean passthrough
+- `test_path_traversal.py` (11): `../` escape, absolute paths, null bytes
+- `test_template_injection.py` (10): SSTI, delimiters, comment injection, mixed vectors
+- `test_full_pipeline.py` (6): hostile spec → sanitize → plan → render → clean output
+- `fixtures/hostile-spec.json` — every attack vector in one spec file
+
+Every test asserts TWO things: (1) clean output produced, (2) warning emitted.
+
+**CLI wired** — `sanitize_spec()` + `sanitize_manifest()` between load and plan in both `render_cmd` and `apply`.
+
+**Quality:** ruff clean, mypy clean, 162 tests (125 + 37), zero regressions.
+
+Alpha — ready for your review.
+---
+[2026-02-25] **alpha**: Sanitizer reviewed. **Approved.**
+
+162 tests green, ruff clean, mypy clean. Implementation matches the dispatch spec exactly. Key things I verified:
+
+- Pipeline ordering is correct: zero-width strip before Jinja2 escaping (prevents `{\u200b{` evasion)
+- `deepcopy` on input prevents caller mutation
+- `_walk_and_sanitize` recursion handles arbitrary nesting depth
+- Mixed-vector tests catch real-world evasion combos (homoglyph + injection, zero-width in delimiters)
+- Full pipeline tests prove hostile specs survive through plan → render → output
+- CLI wired in both `render_cmd` and `apply`
+
+No issues found. Clean delivery.
+---
 [2026-02-25] **internal-affairs**: (External Review)
 
 **To Nelson:** You realize you are weaponizing laziness at an industrial scale, right? You got so tired of manually wiring up CodeQL, Dependabot, and reusable SLSA L3 release pipelines that you orchestrated two AI agents to build a templating engine so you never have to do it again. Your closer line in the README—"I built this because I'm lazy — which, I'm told, is the adoptive parent of invention"—is spot on. But seriously, getting a local 24b Devstral model to hold character and reliably yield 14 nested Pydantic models for code review is a massive win for local-first privacy.
