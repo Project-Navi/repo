@@ -273,6 +273,26 @@ def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
     pr.create_issue_comment(body)
 
 
+def _with_timeout(fn: Callable[[], Any], *, timeout_seconds: int) -> Any:
+    """Run *fn* with a SIGALRM timeout (Linux only).  0 = no timeout."""
+    if timeout_seconds <= 0:
+        return fn()
+
+    import signal
+
+    def _handler(signum: int, frame: Any) -> None:
+        msg = f"Review timed out after {timeout_seconds}s"
+        raise TimeoutError(msg)
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(timeout_seconds)
+    try:
+        return fn()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
 def main() -> None:
     """CI entry point — reads env, runs review, posts comment."""
     # Load .dev.vars if present (local dev)
@@ -290,6 +310,7 @@ def main() -> None:
     base_url = os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1")
     model_id = os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512")
     mode = os.environ.get("GRIPPY_MODE", "pr_review")
+    timeout_seconds = int(os.environ.get("GRIPPY_TIMEOUT", "300"))
 
     if not token:
         print("::error::GITHUB_TOKEN not set")
@@ -368,7 +389,10 @@ def main() -> None:
     # 4. Run review with retry + validation (replaces agent.run + parse_review_response)
     print(f"Running review (model={model_id}, endpoint={base_url})...")
     try:
-        review = run_review(agent, user_message)
+        review = _with_timeout(
+            lambda: run_review(agent, user_message),
+            timeout_seconds=timeout_seconds,
+        )
     except ReviewParseError as exc:
         print(f"::error::Grippy review failed after {exc.attempts} attempts: {exc}")
         raw_preview = exc.last_raw[:500]
@@ -380,6 +404,21 @@ def main() -> None:
                 f"{COMMENT_MARKER}"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
+        except Exception:
+            pass
+        sys.exit(1)
+    except TimeoutError as exc:
+        print(f"::error::Grippy review timed out: {exc}")
+        try:
+            failure_body = (
+                f"## \u274c Grippy Review \u2014 TIMEOUT\n\n"
+                f"Review timed out after {timeout_seconds}s.\n\n"
+                f"Model: {model_id} at {base_url}\n\n"
+                f"{COMMENT_MARKER}"
+            )
+            post_comment(
+                token, pr_event["repo"], pr_event["pr_number"], failure_body
+            )
         except Exception:
             pass
         sys.exit(1)

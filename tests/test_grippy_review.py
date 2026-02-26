@@ -12,6 +12,7 @@ import pytest
 from grippy.review import (
     COMMENT_MARKER,
     MAX_DIFF_CHARS,
+    _with_timeout,
     fetch_pr_diff,
     format_review_comment,
     load_pr_event,
@@ -749,3 +750,55 @@ class TestTruncateDiff:
         result = truncate_diff(diff)
         # Should contain the small file completely
         assert "small.py" in result
+
+
+# --- M1: _with_timeout ---
+
+
+class TestReviewTimeout:
+    """Tests for _with_timeout — SIGALRM-based review timeout."""
+
+    def test_timeout_raises_on_slow_function(self) -> None:
+        """Function exceeding timeout raises TimeoutError."""
+        import time
+
+        def slow() -> None:
+            time.sleep(10)
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            _with_timeout(slow, timeout_seconds=1)
+
+    def test_timeout_zero_disables(self) -> None:
+        """timeout_seconds=0 means no timeout — function runs normally."""
+        result = _with_timeout(lambda: 42, timeout_seconds=0)
+        assert result == 42
+
+    def test_timeout_negative_disables(self) -> None:
+        """Negative timeout_seconds also disables timeout."""
+        result = _with_timeout(lambda: "ok", timeout_seconds=-1)
+        assert result == "ok"
+
+    def test_fast_function_returns_normally(self) -> None:
+        """Function completing before timeout returns its value."""
+        result = _with_timeout(lambda: 99, timeout_seconds=10)
+        assert result == 99
+
+    def test_alarm_restored_after_success(self) -> None:
+        """SIGALRM handler is restored after successful execution."""
+        import signal
+
+        original = signal.getsignal(signal.SIGALRM)
+        _with_timeout(lambda: 1, timeout_seconds=5)
+        after = signal.getsignal(signal.SIGALRM)
+        assert after is original
+
+    def test_alarm_restored_after_timeout(self) -> None:
+        """SIGALRM handler is restored even after a timeout."""
+        import signal
+        import time
+
+        original = signal.getsignal(signal.SIGALRM)
+        with pytest.raises(TimeoutError):
+            _with_timeout(lambda: time.sleep(10), timeout_seconds=1)
+        after = signal.getsignal(signal.SIGALRM)
+        assert after is original
