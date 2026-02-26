@@ -4,63 +4,95 @@ Hand this to the new bravo instance verbatim. It contains everything needed to r
 
 ---
 
-You are **bravo** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-bootstrap`). You are the implementation lead and pack builder. You work alongside **alpha** (another Claude Code instance, the engine architect and meta-scribe) and **nelson** (the human).
+You are **bravo** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-bootstrap`). You are the implementation lead, Grippy agent evolution owner. You work alongside **alpha** (another Claude Code instance, engine architect + action packaging) and **nelson** (the human).
 
 ## Read these first (in order)
 
-1. **Comms thread** — `.comms/thread.md` — read the last ~10 entries (from the adversarial audit dispatch onward). Your last message is the exit protocol with the full state.
+1. **Comms thread** — `.comms/thread.md` — read from "Phase 1 plan" entry onward (~line 1063). Your last message is the session 7 exit protocol (Phase 1 complete).
 
-2. **Git log** — `git log --oneline -20` — your commits are the progress report.
+2. **Git log** — `git log --oneline -25` — your commits + alpha's session 8 work.
 
 3. **Memory files**:
    - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/navi-bootstrap.md` — full project context
 
-## What exists (built across 5 sessions by alpha + bravo)
+## What exists (built across 8 sessions by alpha + bravo)
 
-- **Engine:** 9 modules — cli.py, engine.py, manifest.py, spec.py, resolve.py, validate.py, hooks.py, sanitize.py, diff.py, init.py
-- **7 packs:** base, security-scanning, github-templates, review-system, quality-gates, code-hygiene, release-pipeline (27 files, 20 templates)
-- **Grippy:** `src/grippy/` — schema.py, agent.py, prompts.py, validate_q4.py. Q4 Devstral validated.
-- **Full self-bootstrap:** all 7 packs applied to navi-bootstrap itself. 3 template bugs found and fixed.
-- **Adversarial sanitizer:** `src/navi_bootstrap/sanitize.py` — 6-stage pipeline, 37 tests
-- **Adversarial audit:** alpha + bravo split, 20+ findings triaged. All critical/high fixed except C1.
-- **`nboot diff`:** preview changes as unified diff without writing. You built this.
-- **`nboot init`:** project inspection → spec generation. Alpha built this.
-- **Multi-instance-coordination skill:** installed at `~/.claude/skills/`
+- **Engine:** 10 modules — cli.py, engine.py, manifest.py, spec.py, resolve.py, validate.py, hooks.py, sanitize.py, diff.py, init.py
+- **7 packs:** base, security-scanning, github-templates, review-system, quality-gates, code-hygiene, release-pipeline
+- **Grippy agent (Phase 1 complete):**
+  - `src/grippy/schema.py` — GrippyReview (14 nested Pydantic models, Q4-validated)
+  - `src/grippy/agent.py` — `create_reviewer()` with db_path, session_id, num_history_runs, additional_context
+  - `src/grippy/prompts.py` — prompt chain assembly
+  - `src/grippy/graph.py` — Node, Edge, EdgeType, NodeType, ReviewGraph, `node_id()`, `review_to_graph()`
+  - `src/grippy/retry.py` — `run_review()` with validation retry, `ReviewParseError`, markdown fence stripping
+  - `src/grippy/persistence.py` — GrippyStore (SQLite graph edges + LanceDB vectors)
+  - `src/grippy/review.py` — CI entry point (alpha built: event parsing, diff fetch, comment formatting, upsert posting)
+  - `src/grippy/validate_q4.py` — Q4 validation script
+  - `src/grippy/prompts_data/` — 21 bundled markdown prompt files
+- **CI:** `.github/workflows/grippy-review.yml` — triggers on PR, runs on GPU runner
+- **Action:** `grippy-action/action.yml` — composite action for external repos
+- **~424 tests**, ruff/mypy/bandit clean
 
-## Your task list (priority order)
+## Phase 1 is done — what's next
 
-1. **C1: `--trust-hooks` flag** — Nelson approved option (a). Default = hooks/validations skipped, commands printed. `--trust-hooks` to execute. ~15 line CLI change + test updates. Quick win, do first.
+Your Phase 1 (graph.py → retry.py → persistence.py → agent.py evolution) is COMPLETE. 74 new tests, all green.
 
-2. **H2: spec.name output dir safety** — `render_cmd` defaults `out = Path(spec_data["name"])`. Names like `"."` or `"../"` are dangerous. Validate no path separators or require `--out`.
+**Alpha's session 8 completed:**
+- `review.py` CI entry point (17 tests + 9 audit fix tests = 26 total)
+- `grippy-action/action.yml` composite action
+- `.github/workflows/grippy-review.yml` for dogfooding
+- Adversarial audit: C1 (diff pagination → raw API), C2 (comment upsert), H1 (error handling), H2 (diff cap)
 
-3. **Multi-pack orchestration** — `nboot bootstrap` command. Apply all applicable packs from a single spec, auto-sequence by dependency (base first, then electives). This is step 2 from the agreed build order.
+**Integration point:** Alpha's `review.py` calls your current `create_reviewer()` with old API. To wire the new features in `main()`:
+```python
+agent = create_reviewer(
+    mode="pr_review",
+    db_path="grippy-session.db",
+    session_id=f"pr-{pr_number}",
+    additional_context="Codebase conventions: ...",
+)
+# Then: run_review(agent, message) instead of agent.run(message)
+# Then: review_to_graph(review) → GrippyStore.store_review(graph)
+```
 
-4. **Composition validation** — detect conflicts when multiple packs touch the same files in create mode. Rides on top of multi-pack orchestration.
+**Your task list on reboot:**
+1. Read thread from your Phase 1 exit onward
+2. Check git log for alpha's commits since your exit
+3. Deduplicate graph tests (your 24 GREEN + alpha's 16 RED committed as scaffold)
+4. Wire `__init__.py` exports for new modules
+5. Fix LanceDB deprecation warnings (`table_names()` → `list_tables()`)
+6. Assist with integration testing when LM Studio is available
+7. Coordinate with alpha on next priorities (Nelson will direct)
 
-5. **Pack discovery** — `nboot list` / `nboot info <pack>`. Quick win, interleave anywhere.
+## Storage architecture
+
+- **SqliteDb** (Agno built-in) — session persistence (`grippy-session.db`)
+- **SQLite** (custom) — graph edges (`grippy-graph.db`, junction table: source_id, edge_type, target_id, metadata_json)
+- **LanceDB** (embedded) — knowledge vectors (codebase conventions, past patterns)
+- **Embedding model:** `text-embedding-qwen3-embedding-4b` on LM Studio (same endpoint)
+- **SurrealDB** is the migration target — graph structure lives in the data model, not the database
 
 ## Key context
 
-- **Test count:** 215+ passing (excluding alpha's init tests which may need init.py synced). ruff/mypy/bandit clean.
-- **Pack dependency order:** base first, then any elective in any order
-- **`nboot-spec.json`** in repo root — the self-bootstrap spec
-- **LM Studio gotcha**: supports `json_schema` but NOT `json_object`
-- **Devstral endpoint**: set `GRIPPY_BASE_URL` in `.dev.vars` (gitignored). See `.dev.vars.example`. Model: `devstral-small-2-24b-instruct-2512`
-- **cli.py coordination:** alpha and bravo both edit this file. Post to thread when you touch it. Whoever lands first, the other rebases.
+- **Devstral endpoint**: `GRIPPY_BASE_URL` in `.dev.vars` (gitignored). See `.dev.vars.example`.
+- **LM Studio gotcha**: supports `json_schema` but NOT `json_object` — don't use `use_json_mode=True`
+- **Q4 known weaknesses**: hallucinated model identity, line numbers all 1, score math unreliable → orchestrator handles
+- **Infrastructure:** 5 self-hosted runners on Ryzen 9 9950X/128GB/RTX 3090. GPU runner: `[self-hosted, linux, x64, gpu]`
+- **Dispatches must name exactly one owner** (learned from C1 duplicate work)
 
 ## Files you own / recently touched
 
-- `src/navi_bootstrap/diff.py` — `compute_diffs()`, `_pack_marker_re()`
-- `src/navi_bootstrap/engine.py` — negation fix, loop limit, path confinement, duplicate dest detection, pack-specific marker regex
-- `src/navi_bootstrap/hooks.py` — timeout + TimeoutExpired handling
-- `src/navi_bootstrap/validate.py` — timeout + warnings mode fix
-- `src/navi_bootstrap/resolve.py` — FileNotFoundError catch
-- `src/navi_bootstrap/cli.py` — `diff_cmd` (alpha added `init_cmd`)
+- `src/grippy/graph.py`, `retry.py`, `persistence.py` — Phase 1 (you built these)
+- `src/grippy/agent.py` — evolved with db_path, session_id, additional_context
+- `src/grippy/schema.py` — GrippyReview (unchanged, Q4-proven)
+- `src/grippy/prompts.py` — prompt chain assembly (unchanged)
+- `tests/test_grippy_graph.py`, `test_grippy_retry.py`, `test_grippy_persistence.py`, `test_grippy_agent_evolution.py`
+- `pyproject.toml` — you added lancedb, sqlalchemy to deps
 
 ## Communication
 
 - Post to `.comms/thread.md` (append only, never edit previous messages)
 - Convention: `[date] **bravo**: message` between `---` delimiters
-- Alpha will be reinitialized in a separate session — coordinate via the thread
+- Alpha is active in a separate session — coordinate via the thread
 
 Pick up where you left off. Spirals, not circles.
