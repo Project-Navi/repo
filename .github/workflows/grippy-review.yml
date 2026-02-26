@@ -3,6 +3,16 @@ name: Grippy Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner to use (ubuntu-latest or self-hosted)'
+        required: false
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
 
 permissions:
   contents: read
@@ -11,7 +21,7 @@ permissions:
 jobs:
   review:
     name: Grippy Code Review
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
 
     steps:
       - name: Checkout
@@ -22,6 +32,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Cache Grippy data
+        uses: actions/cache@v4
+        with:
+          path: ./grippy-data
+          key: grippy-data-${{ github.repository }}
+          restore-keys: |
+            grippy-data-
+
       - name: Install navi-bootstrap with grippy extras
         run: pip install ".[grippy,grippy-persistence]"
 
@@ -31,7 +49,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRIPPY_TRANSPORT: openai
+          GRIPPY_BASE_URL: https://api.openai.com/v1
           GRIPPY_MODEL_ID: gpt-5.2
+          GRIPPY_EMBEDDING_MODEL: text-embedding-3-large
+          GRIPPY_DATA_DIR: ./grippy-data
           GRIPPY_TIMEOUT: '300'
         run: python -m grippy.review
 

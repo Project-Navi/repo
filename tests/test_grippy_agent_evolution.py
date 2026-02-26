@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
-from grippy.agent import create_reviewer, format_pr_context
+import pytest
+
+from grippy.agent import _resolve_transport, create_reviewer, format_pr_context
 
 # Default prompts dir for all tests
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "src" / "grippy" / "prompts_data"
@@ -141,3 +144,64 @@ class TestFormatPrContext:
             diff=diff,
         )
         assert "Changed Files: 1" in result
+
+
+# --- Transport selection ---
+
+
+class TestTransportSelection:
+    """Tests for explicit transport selection (F2 fix)."""
+
+    def test_explicit_local_transport(self) -> None:
+        """transport='local' uses OpenAILike regardless of env."""
+        agent = create_reviewer(
+            prompts_dir=PROMPTS_DIR, transport="local"
+        )
+        from agno.models.openai.like import OpenAILike
+
+        assert isinstance(agent.model, OpenAILike)
+
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}, clear=False)
+    def test_explicit_openai_transport(self) -> None:
+        """transport='openai' uses OpenAIChat."""
+        agent = create_reviewer(
+            prompts_dir=PROMPTS_DIR, transport="openai"
+        )
+        from agno.models.openai import OpenAIChat
+
+        assert isinstance(agent.model, OpenAIChat)
+
+    def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GRIPPY_TRANSPORT env var overrides inference."""
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "local")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        transport, source = _resolve_transport(None, "test-model")
+        assert transport == "local"
+        assert source == "env:GRIPPY_TRANSPORT"
+
+    def test_param_precedence_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit param takes precedence over GRIPPY_TRANSPORT env var."""
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "openai")
+        transport, source = _resolve_transport("local", "test-model")
+        assert transport == "local"
+        assert source == "param"
+
+    def test_inference_warning_when_no_explicit(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Inferring from OPENAI_API_KEY prints a notice warning."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("GRIPPY_TRANSPORT", raising=False)
+        transport, source = _resolve_transport(None, "test-model")
+        assert transport == "openai"
+        assert "inferred" in source
+        captured = capsys.readouterr()
+        assert "::notice::" in captured.out
+
+    def test_default_is_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No env vars and no param defaults to local transport."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GRIPPY_TRANSPORT", raising=False)
+        transport, source = _resolve_transport(None, "test-model")
+        assert transport == "local"
+        assert source == "default"

@@ -102,12 +102,23 @@ reviewer = create_reviewer(
 
 ### CI Configuration
 
-| Deployment | Environment Variables |
+| Variable | Description | Default |
+|---|---|---|
+| `GRIPPY_TRANSPORT` | `"openai"` or `"local"` — explicit model routing | Inferred from `OPENAI_API_KEY` |
+| `OPENAI_API_KEY` | OpenAI API key (required for `transport=openai`) | — |
+| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints (embedding auth fallback) | — |
+| `GRIPPY_BASE_URL` | OpenAI-compatible API endpoint | `http://localhost:1234/v1` |
+| `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
+| `GRIPPY_EMBEDDING_MODEL` | Embedding model for knowledge graph | `text-embedding-qwen3-embedding-4b` |
+| `GRIPPY_DATA_DIR` | Persistent directory for graph DB + LanceDB | `./grippy-data` |
+| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = no timeout) | `300` |
+
+| Deployment | Key Variables |
 |---|---|
-| **OpenAI** (GitHub-hosted) | `OPENAI_API_KEY`, `GRIPPY_MODEL_ID=gpt-5.2` |
+| **OpenAI** (GitHub-hosted) | `GRIPPY_TRANSPORT=openai`, `OPENAI_API_KEY`, `GRIPPY_MODEL_ID=gpt-5.2` |
 | **Local** (self-hosted runner) | `GRIPPY_BASE_URL=http://<host>:1234/v1`, `GRIPPY_MODEL_ID=<model>`, `GRIPPY_EMBEDDING_MODEL=<embed-model>` |
 
-The architecture is identical in both modes — only the model transport changes.
+The architecture is identical in both modes — only the model transport changes. Defaults are local-first; CI sets OpenAI values explicitly.
 
 ## Architecture
 
