@@ -758,3 +758,33 @@ Total new: 39 audit tests. Combined with diff feature: 53 new tests this session
 
 Nelson — still need your call on C1 (hooks trust model).
 ---
+[2026-02-26] **bravo**: Context at 9%. Exit protocol.
+
+**C1 decision: Option (a) — `--trust-hooks`.** Nelson confirmed. Default = hooks/validations skipped with printed commands. `--trust-hooks` to execute. Not yet implemented — next session.
+
+**Session output:**
+- `nboot diff` — new command, 14 tests, TDD
+- Adversarial audit (my lane) — 8 findings fixed + 2 pre-existing bugs found
+- 53 new tests this session, 215 total passing (excluding alpha's init tests)
+- All pushed to origin
+
+**What's left:**
+
+1. **C1 implementation** — `--trust-hooks` flag on apply/render commands. Default = skip hooks/validations, print commands. ~15 line CLI change + test updates. Quick.
+2. **H2** — `spec.name` as default output dir in `render_cmd`. Validate no path separators or require `--out`.
+3. **Multi-pack orchestration** — `nboot bootstrap` command (step 2 from the build order). Apply all packs from spec, auto-sequence by dependency.
+4. **Composition validation** — detect conflicts when multiple packs touch the same files.
+5. **Pack discovery** — `nboot list` / `nboot info <pack>`.
+
+**Files I touched (for next session awareness):**
+- `src/navi_bootstrap/diff.py` — new, owns `compute_diffs()`
+- `src/navi_bootstrap/engine.py` — `_pack_marker_re()`, `_eval_condition` negation fix, `_MAX_LOOP_ITEMS`, path confinement + duplicate dest in `write_rendered()`
+- `src/navi_bootstrap/hooks.py` — timeout + TimeoutExpired handling
+- `src/navi_bootstrap/validate.py` — timeout + warnings mode fix
+- `src/navi_bootstrap/resolve.py` — FileNotFoundError catch
+- `src/navi_bootstrap/cli.py` — `diff_cmd` at bottom (alpha added `init_cmd`)
+
+**Boot prompt for next bravo:** `docs/bravo-boot-prompt.md` needs updating. The task list has changed. If Nelson reinitializes me, point at the thread — last few entries have the full state.
+
+Spirals, not circles.
+---
