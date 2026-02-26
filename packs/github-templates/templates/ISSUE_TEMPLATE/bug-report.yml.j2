@@ -1,6 +1,6 @@
 {%- set gh = spec.github | default({}) -%}
 name: Bug Report
-description: Report a bug in {{ spec.name }}
+description: "Report a bug in {{ spec.name }}"
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
@@ -77,8 +77,8 @@ body:
   - type: input
     id: package-version
     attributes:
-      label: {{ spec.name }} Version
-      description: Output of `pip show {{ spec.name }}` or the version you are using.
+      label: "{{ spec.name }} Version"
+      description: "Output of `pip show {{ spec.name }}` or the version you are using."
       placeholder: "0.1.0"
     validations:
       required: true

@@ -38,18 +38,30 @@ def run_validations(validations: list[dict[str, Any]], working_dir: Path) -> lis
         command = v["command"]
         expect = v.get("expect", "exit_code_0")
 
-        result = subprocess.run(
-            command,
-            shell=True,  # nosec B602
-            capture_output=True,
-            text=True,
-            cwd=working_dir,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,  # nosec B602
+                capture_output=True,
+                text=True,
+                cwd=working_dir,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            results.append(
+                ValidationResult(
+                    description=description,
+                    passed=False,
+                    stderr="Timed out after 300 seconds",
+                    returncode=-1,
+                )
+            )
+            continue
 
         if expect == "exit_code_0":
             passed = result.returncode == 0
         elif expect == "exit_code_0_or_warnings":
-            passed = True  # Accept any exit code for this mode
+            passed = result.returncode in (0, 1)
         else:
             passed = result.returncode == 0
 

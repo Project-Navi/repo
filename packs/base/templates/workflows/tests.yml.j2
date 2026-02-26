@@ -1,3 +1,6 @@
+{%- set pv = spec.python_version | default("3.12") -%}
+{%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
 name: Tests
 
 on:
@@ -42,7 +45,7 @@ jobs:
         run: uv sync
 
       - name: Run tests
-        run: uv run pytest {{ spec.structure.test_dir | default("tests") }}/ -v --cov={{ spec.structure.src_dir }} --cov-report=term-missing
+        run: uv run pytest {{ tst }}/ -v --cov={{ src }} --cov-report=term-missing
 
   lint:
     runs-on: ubuntu-latest
@@ -60,7 +63,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@{{ action_shas.actions_setup_python }}  # {{ action_versions.actions_setup_python }}
         with:
-          python-version: "{{ spec.python_version }}"
+          python-version: "{{ pv }}"
 
       - name: Install uv
         run: pip install uv
@@ -69,13 +72,13 @@ jobs:
         run: uv sync
 
       - name: Lint
-        run: uv run ruff check {{ spec.structure.src_dir }}/ {{ spec.structure.test_dir | default("tests") }}/
+        run: uv run ruff check {{ src }}/ {{ tst }}/
 
       - name: Format check
-        run: uv run ruff format --check {{ spec.structure.src_dir }}/ {{ spec.structure.test_dir | default("tests") }}/
+        run: uv run ruff format --check {{ src }}/ {{ tst }}/
 
       - name: Security scan
-        run: uv run bandit -r {{ spec.structure.src_dir }} -ll
+        run: uv run bandit -r {{ src }} -ll
 
       - name: Type check
-        run: uv run mypy {{ spec.structure.src_dir }}/ --ignore-missing-imports
+        run: uv run mypy {{ src }}/ --ignore-missing-imports

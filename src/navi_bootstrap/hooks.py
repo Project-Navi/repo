@@ -26,21 +26,32 @@ def run_hooks(hooks: list[str], working_dir: Path) -> list[HookResult]:
     results: list[HookResult] = []
 
     for command in hooks:
-        result = subprocess.run(
-            command,
-            shell=True,  # nosec B602
-            capture_output=True,
-            text=True,
-            cwd=working_dir,
-        )
-        results.append(
-            HookResult(
-                command=command,
-                success=result.returncode == 0,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                returncode=result.returncode,
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,  # nosec B602
+                capture_output=True,
+                text=True,
+                cwd=working_dir,
+                timeout=300,
             )
-        )
+            results.append(
+                HookResult(
+                    command=command,
+                    success=result.returncode == 0,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    returncode=result.returncode,
+                )
+            )
+        except subprocess.TimeoutExpired:
+            results.append(
+                HookResult(
+                    command=command,
+                    success=False,
+                    stderr="Timed out after 300 seconds",
+                    returncode=-1,
+                )
+            )
 
     return results

@@ -61,7 +61,7 @@ def resolve_action_shas(
         else:
             try:
                 shas[name] = _resolve_one(entry["repo"], entry["tag"])
-            except (ResolveError, KeyError, json.JSONDecodeError) as e:
+            except (ResolveError, KeyError, json.JSONDecodeError, FileNotFoundError) as e:
                 raise ResolveError(
                     f"Failed to resolve SHA for {entry['repo']}@{entry['tag']}: {e}"
                 ) from e

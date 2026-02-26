@@ -63,7 +63,9 @@ def _eval_condition(condition_expr: str, spec: dict[str, Any]) -> bool:
     Supports negation with '!' prefix: "!spec.recon.existing_tools.ruff"
     evaluates to True when the dotpath is falsy.
     """
-    negate = condition_expr.startswith("!")
+    # Count leading ! for proper negation (!! cancels out)
+    bang_count = len(condition_expr) - len(condition_expr.lstrip("!"))
+    negate = bang_count % 2 == 1
     path = condition_expr.lstrip("!")
     context = {"spec": spec}
     value = _resolve_dotpath(context, path)
@@ -76,6 +78,9 @@ def _render_dest_path(dest_template: str, context: dict[str, Any]) -> str:
     env = jinja2.Environment(undefined=jinja2.StrictUndefined)  # nosec B701
     tmpl = env.from_string(dest_template)
     return tmpl.render(**context)
+
+
+_MAX_LOOP_ITEMS = 1000
 
 
 def plan(
@@ -106,6 +111,11 @@ def plan(
             items = _resolve_dotpath({"spec": spec}, over_path)
             if items is None:
                 items = []
+            if len(items) > _MAX_LOOP_ITEMS:
+                raise ValueError(
+                    f"Loop over '{over_path}' has {len(items)} items "
+                    f"(limit {_MAX_LOOP_ITEMS}). Too many items to expand."
+                )
             for item in items:
                 context = {"spec": spec, as_name: item}
                 resolved_dest = _render_dest_path(dest, context)
@@ -170,6 +180,15 @@ _MARKER_RE = re.compile(
 )
 
 
+def _pack_marker_re(pack_name: str) -> re.Pattern[str]:
+    """Build a regex that matches only the given pack's marker block."""
+    escaped = re.escape(pack_name)
+    return re.compile(
+        rf"# --- nboot: {escaped} ---\n.*?# --- end nboot: {escaped} ---\n?",
+        re.DOTALL,
+    )
+
+
 def _write_append(output_path: Path, rendered: str, pack_name: str) -> None:
     """Append rendered content with marker blocks, replacing existing markers."""
     marker_start = _MARKER_START.format(pack_name=pack_name)
@@ -180,7 +199,8 @@ def _write_append(output_path: Path, rendered: str, pack_name: str) -> None:
         existing = output_path.read_text()
         # Replace existing marker block if present
         if marker_start in existing:
-            new_content = _MARKER_RE.sub("", existing, count=1)
+            pack_re = _pack_marker_re(pack_name)
+            new_content = pack_re.sub("", existing, count=1)
             if new_content and not new_content.endswith("\n"):
                 new_content += "\n"
             output_path.write_text(new_content + block)
@@ -207,8 +227,23 @@ def write_rendered(
     """
     written: list[Path] = []
 
+    seen_create_dests: set[str] = set()
+
     for rf in rendered_files:
         output_path = output_dir / rf.dest
+
+        # Path confinement: resolved path must stay within output_dir
+        try:
+            resolved = output_path.resolve()
+            resolved.relative_to(output_dir.resolve())
+        except ValueError:
+            raise ValueError(f"Path escapes outside output directory: {rf.dest}") from None
+
+        # Duplicate dest detection for create mode
+        if rf.mode != "append":
+            if rf.dest in seen_create_dests:
+                raise ValueError(f"Duplicate dest path in create mode: {rf.dest}")
+            seen_create_dests.add(rf.dest)
 
         if rf.mode == "append":
             _write_append(output_path, rf.content, pack_name)
@@ -216,6 +251,9 @@ def write_rendered(
             if mode == "greenfield" and output_path.exists():
                 raise FileExistsError(f"File already exists (greenfield mode): {output_path}")
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Final symlink check after mkdir
+            if output_path.exists() and output_path.resolve() != (output_dir / rf.dest).resolve():
+                raise ValueError(f"Path escapes outside output directory (symlink): {rf.dest}")
             output_path.write_text(rf.content)
 
         written.append(output_path)
