@@ -93,7 +93,7 @@ class ReviewScope(BaseModel):
 
 
 class Finding(BaseModel):
-    model_config = {"frozen": False}
+    model_config = {"frozen": True}
 
     id: str = Field(description="F-001 through F-999")
     severity: Severity
@@ -116,7 +116,7 @@ class Finding(BaseModel):
         Uses file + category + title — stable across line number shifts,
         severity re-ratings, and description rewrites.
         """
-        key = f"{self.file}:{self.category}:{self.title}"
+        key = f"{self.file.strip()}:{self.category.value}:{self.title.strip().lower()}"
         return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 

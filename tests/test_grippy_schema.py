@@ -343,3 +343,49 @@ class TestFindingFingerprint:
         f = Finding(**_minimal_finding())
         assert len(f.fingerprint) == 12
         assert all(c in "0123456789abcdef" for c in f.fingerprint)
+
+    def test_fingerprint_stable_across_whitespace(self) -> None:
+        """Trailing/leading whitespace in title doesn't change fingerprint."""
+        f1 = Finding(**_minimal_finding(title="SQL injection"))
+        f2 = Finding(**_minimal_finding(title="SQL injection "))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_case(self) -> None:
+        """Title case doesn't change fingerprint."""
+        f1 = Finding(**_minimal_finding(title="SQL Injection"))
+        f2 = Finding(**_minimal_finding(title="sql injection"))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_category_enum(self) -> None:
+        """Uses category.value (string), not enum repr."""
+        f1 = Finding(**_minimal_finding(category="security"))
+        f2 = Finding(**_minimal_finding(category="security"))
+        # Both should use the string value "security" in the hash key
+        assert f1.fingerprint == f2.fingerprint
+        # And the key should use the value, not something like "FindingCategory.SECURITY"
+        import hashlib
+
+        expected_key = f"{f1.file.strip()}:{f1.category.value}:{f1.title.strip().lower()}"
+        expected_fp = hashlib.sha256(expected_key.encode()).hexdigest()[:12]
+        assert f1.fingerprint == expected_fp
+
+
+# --- Finding frozen model (Commit 2, Issue #7) ---
+
+
+class TestFindingFrozen:
+    """Finding model should be frozen to prevent accidental mutation."""
+
+    def test_finding_is_frozen(self) -> None:
+        """Assigning to a field on a frozen Finding raises ValidationError."""
+        f = Finding(**_minimal_finding())
+        with pytest.raises(ValidationError):
+            f.file = "other.py"  # type: ignore[misc]
+
+    def test_fingerprint_accessible_on_frozen_model(self) -> None:
+        """cached_property fingerprint works on a frozen Pydantic model."""
+        f = Finding(**_minimal_finding())
+        fp = f.fingerprint
+        assert len(fp) == 12
+        # Access again — should be cached
+        assert f.fingerprint == fp
