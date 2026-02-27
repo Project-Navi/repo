@@ -248,6 +248,25 @@ class TestGrippyReviewRoundTrip:
         with pytest.raises(ValidationError, match="overall"):
             GrippyReview(**data)
 
+    @pytest.mark.parametrize(
+        "field", ["security", "logic", "governance", "reliability", "observability"]
+    )
+    def test_score_breakdown_rejects_negative(self, field: str) -> None:
+        """ScoreBreakdown fields must be 0-100, not deduction-style negatives."""
+        data = _minimal_review()
+        data["score"]["breakdown"][field] = -17
+        with pytest.raises(ValidationError):
+            GrippyReview(**data)
+
+    @pytest.mark.parametrize(
+        "field", ["security", "logic", "governance", "reliability", "observability"]
+    )
+    def test_score_breakdown_rejects_over_100(self, field: str) -> None:
+        data = _minimal_review()
+        data["score"]["breakdown"][field] = 101
+        with pytest.raises(ValidationError):
+            GrippyReview(**data)
+
     def test_escalation_included(self) -> None:
         data = _minimal_review()
         data["escalations"] = [

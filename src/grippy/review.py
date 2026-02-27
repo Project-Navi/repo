@@ -486,6 +486,9 @@ def main() -> None:
             pass
         sys.exit(1)
 
+    # Override self-reported model — LLMs hallucinate their own model name
+    review.model = model_id
+
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
