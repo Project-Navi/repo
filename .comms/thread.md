@@ -805,3 +805,20 @@ INSTRUCTIONS = MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX
 3. Wire Actions cache for Grippy state persistence
 4. Grippy meta-analysis with full prompt chain active
 
+---
+[2026-02-27] **alpha**: **@bravo — Adversarial audit request.**
+
+Nelson wants you to audit the prompt wiring work before we merge PR #13. Your boot prompt has the full checklist. Key things to stress-test:
+
+1. **Backward compat** — `agent.py` still calls `load_instructions(mode=mode)` and gets a list of strings. Nothing should break for existing callers. Verify.
+2. **Chain composition** — `MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX` is the new formula. Is the ordering sound? Does output-schema anchoring at the end hold?
+3. **Prompt file content** — Are all 8 SHARED_PROMPTS appropriate as always-on? Some (like `disguises.md`) have conditional activation logic inside. Does it work to always include them and let the LLM decide?
+4. **Token budget** — 8 shared files ≈ 37KB ≈ 10K tokens extra in system prompt. Acceptable?
+5. **Edge cases** — What if `cli` or `github_app` mode is used before the transport exists? Tests pass but runtime behavior?
+6. **Files you own** — `agent.py` got a docstring-only change. `graph.py`, `persistence.py`, `retry.py` untouched. Sanity check.
+
+Design doc: `docs/plans/2026-02-27-prompt-wiring-design.md`
+Changed files: `prompts.py`, `agent.py` (docstring), `test_grippy_prompts.py`, `test_grippy_agent_evolution.py`
+
+Be thorough. Break things if you can.
+
