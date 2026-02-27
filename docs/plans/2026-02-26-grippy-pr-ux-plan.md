@@ -4,7 +4,7 @@
 
 **Goal:** Replace Grippy's noisy issue comments with inline PR review comments, graph-powered finding resolution, and Agno Knowledge-backed persistence.
 
-**Architecture:** Two-layer comment system (summary dashboard + inline review comments via GitHub PR Review API). Finding lifecycle tracked across rounds using deterministic fingerprints + vector similarity via Agno Knowledge/LanceDb. GrippyStore migrated from raw LanceDB to Agno's Knowledge class.
+**Architecture:** Two-layer comment system (summary dashboard + inline review comments via GitHub PR Review API). Finding lifecycle tracked across rounds using deterministic fingerprints. GrippyStore uses Agno `OpenAIEmbedder` for embeddings + raw LanceDB for storage (per Bravo review — Agno `Knowledge` is document-oriented, doesn't fit our structured node use case).
 
 **Tech Stack:** Agno (Knowledge, LanceDb, OpenAIEmbedder, SqliteDb), PyGithub (create_review, get_reviews), GitHub GraphQL (resolveReviewThread via `gh api graphql`), Pydantic, pytest
 
@@ -915,8 +915,9 @@ def format_summary_comment(
     Returns:
         Formatted markdown comment body.
     """
-    emoji = {"\u2705": "PASS", "\u274c": "FAIL", "\u26a0\ufe0f": "PROVISIONAL"}
-    status_emoji = next((k for k, v in emoji.items() if v == verdict), "\U0001f50d")
+    status_emoji = {"PASS": "\u2705", "FAIL": "\u274c", "PROVISIONAL": "\u26a0\ufe0f"}.get(
+        verdict, "\U0001f50d"
+    )
 
     lines: list[str] = []
     lines.append(f"## {status_emoji} Grippy Review \u2014 {verdict}")
@@ -975,9 +976,13 @@ git commit -m "feat: summary dashboard formatter for PR comments"
 
 ---
 
-### Task 7: GrippyStore — Agno Knowledge Migration
+### Task 7: GrippyStore — Embedder Swap + Resolution Methods
 
-Migrate vector storage from raw LanceDB to Agno's Knowledge + LanceDb. Keep SQLite edges.
+Swap `embed_fn` for Agno `OpenAIEmbedder`, add resolution query methods. Keep raw LanceDB storage.
+
+> **Per Bravo review:** Agno's `Knowledge` class is document-oriented (RAG pipeline).
+> We keep raw `lancedb.connect()` for full schema control and only use `OpenAIEmbedder`
+> for the embedding function itself.
 
 **Files:**
 - Modify: `src/grippy/persistence.py`
@@ -1019,11 +1024,6 @@ class TestResolutionQueries:
         assert len(finding_nodes) > 0
         node_id = finding_nodes[0].id
         store.update_finding_status(node_id, "resolved")
-        findings = store.get_prior_findings(review_id=sample_graph.review_id)
-        statuses = {f["node_id"]: f["status"] for f in findings}
-        # If there was only one finding, list might be empty (resolved ones excluded)
-        # OR we need to query all findings regardless of status
-        # Let's check the node directly
         cur = store._conn.cursor()
         cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (node_id,))
         import json
@@ -1042,28 +1042,46 @@ Modify `src/grippy/persistence.py`:
 
 Key changes:
 1. Replace `embed_fn: EmbedFn` param with `embedder` (Agno Embedder instance)
-2. Replace raw `lancedb.connect()` with Agno `Knowledge(vector_db=LanceDb(...))`
-3. Add `get_prior_findings()` and `update_finding_status()` methods
-4. Keep all SQLite edge logic unchanged
-
-The exact implementation depends on verifying the Agno `Knowledge` API during implementation. The core pattern:
+2. Keep raw `lancedb.connect()` for storage — we own the schema
+3. Adapt `_store_nodes()` to call `embedder.get_embedding()` instead of `embed_fn()`
+4. Adapt `search_nodes()` to call `embedder.get_embedding()` for query vector
+5. Add `get_prior_findings()` and `update_finding_status()` methods
+6. Keep all SQLite edge logic unchanged
 
 ```python
-from agno.knowledge.knowledge import Knowledge
-from agno.vectordb.lancedb import LanceDb, SearchType
-
 class GrippyStore:
     def __init__(self, *, graph_db_path, lance_dir, embedder):
-        self._knowledge = Knowledge(
-            vector_db=LanceDb(
-                uri=str(lance_dir),
-                table_name="findings",
-                search_type=SearchType.hybrid,
-                embedder=embedder,
-            ),
-        )
-        # SQLite init unchanged
+        self._graph_db_path = Path(graph_db_path)
+        self._lance_dir = Path(lance_dir)
+        self._embedder = embedder  # Agno OpenAIEmbedder instance
+
+        # Init SQLite (unchanged)
+        self._graph_db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._graph_db_path))
+        self._conn.row_factory = sqlite3.Row
+        self._init_sqlite()
+
+        # Init LanceDB (unchanged — raw connection, we own the schema)
+        self._lance_dir.mkdir(parents=True, exist_ok=True)
+        self._lance_db = lancedb.connect(str(self._lance_dir))
+        self._nodes_table = None
+
+    def _store_nodes(self, graph):
+        """Embed nodes using Agno embedder, store in LanceDB."""
+        # ... build texts list as before ...
+        # Replace: vectors = self._embed_fn(texts)
+        # With: vectors = [self._embedder.get_embedding(t) for t in texts]
+        # Or batch if embedder supports it
         ...
+
+    def search_nodes(self, query, *, k=5):
+        """Semantic search using Agno embedder for query vector."""
+        table = self._ensure_nodes_table()
+        if table is None:
+            return []
+        query_vec = self._embedder.get_embedding(query)
+        arrow_result = table.search(query_vec).limit(k).to_arrow()
+        return _arrow_table_to_dicts(arrow_result)
 
     def get_prior_findings(self, review_id: str) -> list[dict[str, Any]]:
         """Get open findings from a specific review."""
@@ -1358,6 +1376,35 @@ class TestPostReview:
 
         existing_comment.edit.assert_called_once()
         mock_pr.create_issue_comment.assert_not_called()
+
+    @patch("grippy.github_review.Github")
+    def test_fork_pr_skips_inline_comments(self, mock_github_cls: MagicMock) -> None:
+        """Fork PRs put all findings in summary, no inline review."""
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        # Simulate fork: head.repo != base.repo
+        mock_pr.head.repo.full_name = "forker/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new\n line2\n"
+        )
+        findings = [_make_finding(file="src/app.py", line_start=9)]
+
+        post_review(
+            token="test-token", repo="org/repo", pr_number=1,
+            findings=findings, prior_findings=[], head_sha="abc",
+            diff=diff, score=75, verdict="PASS",
+        )
+
+        # Fork: no inline review, but summary still posted
+        mock_pr.create_review.assert_not_called()
+        mock_pr.create_issue_comment.assert_called_once()
 ```
 
 **Step 2: Run tests to verify they fail**
@@ -1405,9 +1452,21 @@ def post_review(
     # Resolve findings against prior round
     resolution = resolve_findings_against_prior(findings, prior_findings)
 
+    # Detect fork PR — GITHUB_TOKEN is read-only for forks
+    is_fork = (
+        pr.head.repo is not None
+        and pr.base.repo is not None
+        and pr.head.repo.full_name != pr.base.repo.full_name
+    )
+
     # Parse diff and classify
     diff_lines = parse_diff_lines(diff)
     inline, off_diff = classify_findings(findings, diff_lines)
+
+    # For fork PRs, skip inline comments — put everything in summary
+    if is_fork:
+        off_diff = findings
+        inline = []
 
     # Post inline review comments (batched at 25)
     if inline:

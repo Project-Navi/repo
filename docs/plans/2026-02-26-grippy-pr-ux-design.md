@@ -99,9 +99,11 @@ def parse_diff_lines(diff_text: str) -> dict[str, set[int]]:
 1. `parse_diff_lines(diff)` → addressable lines map
 2. Classify findings: inline-eligible vs off-diff
 3. Build `ReviewComment` dicts for eligible findings
-4. `pr.create_review(event="COMMENT", comments=[...])` (batched at 25)
-5. Upsert summary issue comment
-6. Store thread IDs in graph for later resolution
+4. Detect fork PR (`head.repo != base.repo`) → skip `create_review()`, put all findings in summary
+5. `pr.create_review(event="COMMENT", comments=[...])` (batched at 25)
+6. Fetch posted review comments via `pr.get_review_comments()`, match fingerprint markers to extract thread IDs
+7. Store thread IDs in graph for later resolution
+8. Upsert summary issue comment
 
 `resolve_findings()` flow:
 1. For each resolved finding, look up thread_id from graph
@@ -110,24 +112,28 @@ def parse_diff_lines(diff_text: str) -> dict[str, set[int]]:
 
 **Permissions:** Current workflow already has `pull-requests: write` + `contents: read`. No changes needed.
 
-### 4. GrippyStore → Agno Knowledge Migration
+### 4. GrippyStore Embedder Swap (revised per Bravo review)
 
 **Current:** Raw `lancedb.connect()` + custom `make_embed_fn()` with manual HTTP auth logic.
 
-**Target:** Agno's native `Knowledge` + `LanceDb` backend with built-in embedder.
+**Target:** Agno `OpenAIEmbedder` for embeddings + raw LanceDB for storage (unchanged).
+
+> **Design decision (Bravo review):** Agno's `Knowledge` class is a document-oriented
+> RAG pipeline (PDF/URL chunking into `Document` objects). It does NOT fit our use case
+> of storing structured finding nodes with custom metadata columns (`fingerprint`,
+> `status`, `thread_id`). We use `OpenAIEmbedder` standalone for auth handling and
+> keep raw `lancedb.connect()` for full schema control.
 
 ```python
 # Before
-store = GrippyStore(graph_db_path=..., lance_dir=..., embed_fn=make_embed_fn(base_url, model))
+embed_fn = make_embed_fn(base_url, model)  # custom HTTP client, manual auth
+store = GrippyStore(..., embed_fn=embed_fn)
 
 # After
-from agno.knowledge.embedder.openai import OpenAIEmbedder
-from agno.knowledge.knowledge import Knowledge
-from agno.vectordb.lancedb import LanceDb, SearchType
-
-embedder = create_embedder(transport, embedding_model, base_url)
-store = GrippyStore(graph_db_path=..., lance_dir=..., embedder=embedder)
-# Internally uses Knowledge(vector_db=LanceDb(embedder=embedder, search_type=SearchType.hybrid))
+embedder = create_embedder(transport, model, base_url)  # Agno OpenAIEmbedder
+store = GrippyStore(..., embedder=embedder)
+# Internally: embedder.get_embedding(text) instead of embed_fn([text])
+# Keep raw lancedb.connect() for storage — we own the schema
 ```
 
 **Embedder factory** (`src/grippy/embedder.py`):
@@ -141,11 +147,12 @@ def create_embedder(transport: str, model: str, base_url: str) -> OpenAIEmbedder
 Replaces `make_embed_fn()` entirely. Drops manual `requests.post()`, host-checking, auth logic.
 
 **GrippyStore changes:**
-- Constructor takes `embedder` instead of `embed_fn`
-- Internally wraps `Knowledge(vector_db=LanceDb(...))` for vector storage
-- Keeps SQLite for edges + node_meta (Agno has no graph abstraction)
-- New methods: `find_matching_findings()`, `get_prior_findings()`
-- `search_nodes()` now uses Agno's hybrid search
+- Constructor takes `embedder` (Agno Embedder) instead of `embed_fn` (Callable)
+- `_store_nodes()` calls `embedder.get_embedding()` instead of `embed_fn()`
+- `search_nodes()` calls `embedder.get_embedding()` for query vector
+- Keeps raw `lancedb.connect()` for storage — full schema control
+- New methods: `get_prior_findings()`, `update_finding_status()`
+- New columns in LanceDB: `fingerprint`, `status`, `thread_id`
 
 ### 5. Round-5 Polish (bundled)
 
@@ -171,7 +178,7 @@ Wrap `create_reviewer()` in `try/except ValueError` in `main()`. On failure, pos
 | File | Changes |
 |------|---------|
 | `src/grippy/review.py` | `main()` rewired: `post_review()` replaces `post_comment()`, `create_embedder()` replaces `make_embed_fn()`, transport error handling |
-| `src/grippy/persistence.py` | `GrippyStore` → Agno `Knowledge` + `LanceDb`, new resolution methods |
+| `src/grippy/persistence.py` | `GrippyStore`: swap `embed_fn` for Agno `embedder`, new resolution methods, keep raw LanceDB |
 | `src/grippy/graph.py` | `RESOLVES` + `PERSISTS_AS` edge types, `fingerprint` + `status` + `thread_id` on FINDING nodes |
 | `src/grippy/schema.py` | `Finding.fingerprint` computed property |
 | `src/grippy/__init__.py` | Updated exports |
