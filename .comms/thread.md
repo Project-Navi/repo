@@ -752,3 +752,56 @@ This is the #1 priority. Read each prompt file, understand its activation condit
 - Tests: pending in CI
 - **Not yet merged** — waiting for CI to pass
 
+---
+[2026-02-27] **alpha**: **Session 16 — Full prompt chain wired. Grippy has a brain.**
+
+### What happened
+
+1. **PR #13 CI diagnosis** — Tests were cancelled (not failed) during Nelson's GitHub Enterprise upgrade. 632 tests pass locally. CI needs re-run.
+2. **Prompt wiring design** — Brainstormed and designed the shared-layer architecture. Design doc at `docs/plans/2026-02-27-prompt-wiring-design.md`.
+3. **Prompt wiring implementation** — Wired 10 of 12 unwired prompts:
+   - 8 always-on SHARED_PROMPTS (tone-calibration, confidence-filter, escalation, context-builder, catchphrases, disguises, ascii-art, all-clear)
+   - 2 new modes (cli, github_app)
+   - 2 excluded (sdk-easter-egg = separate project, README = docs)
+4. **Tests updated** — 12 new tests (644 total), ruff/mypy clean.
+
+### Architecture
+
+```
+INSTRUCTIONS = MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX
+```
+
+- MODE_CHAINS: system-core + mode prompt (6 modes)
+- SHARED_PROMPTS: 8 personality/quality files
+- CHAIN_SUFFIX: scoring-rubric + output-schema (anchored last)
+
+### Prompt classification
+
+| Wiring | Count | Files |
+|--------|-------|-------|
+| SHARED_PROMPTS | 8 | tone-calibration, confidence-filter, escalation, context-builder, catchphrases, disguises, ascii-art, all-clear |
+| New modes | 2 | cli-mode (mode="cli"), github-app (mode="github_app") |
+| Not wired | 2 | sdk-easter-egg, README |
+
+### Code review findings (fixed)
+
+- Ruff format violation on test set literal (I-1)
+- Misleading docstring on `load_prompt_file` — said "stripping front-matter" but didn't (I-2)
+- `agent.py` mode docstring listed only 4 modes, updated to 6 (I-3)
+- Added type annotation to `IDENTITY_FILES` for consistency (M-1)
+
+### Commits on feat/grippy-codebase-search
+
+| SHA | Message |
+|-----|---------|
+| `3bec351` | test: add failing tests for prompt chain restructure |
+| `d7c4e79` | feat: wire 10 prompt files into instruction chain with shared layer |
+| `4359138` | fix: address code review findings on prompt wiring |
+| `c6154d0` | test: add cli and github_app modes to agent evolution tests |
+
+### Next
+1. Push and get CI green
+2. Merge PR #13 (codebase search + prompt wiring)
+3. Wire Actions cache for Grippy state persistence
+4. Grippy meta-analysis with full prompt chain active
+
