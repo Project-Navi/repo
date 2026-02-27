@@ -117,11 +117,11 @@ class Escalation(BaseModel):
 
 
 class ScoreBreakdown(BaseModel):
-    security: int
-    logic: int
-    governance: int
-    reliability: int
-    observability: int
+    security: int = Field(ge=0, le=100)
+    logic: int = Field(ge=0, le=100)
+    governance: int = Field(ge=0, le=100)
+    reliability: int = Field(ge=0, le=100)
+    observability: int = Field(ge=0, le=100)
 
 
 class ScoreDeductions(BaseModel):
