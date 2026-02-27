@@ -4,32 +4,36 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Composition order per system-core.md and grippy-integration-notes.md:
-# CONSTITUTION + PERSONA + system-core + [mode prompt] + scoring-rubric + output-schema
+# Composition order per prompt-wiring-design.md:
+# IDENTITY:      CONSTITUTION + PERSONA (Agno description)
+# INSTRUCTIONS:  MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX (Agno instructions)
 
 IDENTITY_FILES = ["CONSTITUTION.md", "PERSONA.md"]
 
+# Mode-specific prefix: system-core + mode prompt
 MODE_CHAINS: dict[str, list[str]] = {
-    "pr_review": ["system-core.md", "pr-review.md", "scoring-rubric.md", "output-schema.md"],
-    "security_audit": [
-        "system-core.md",
-        "security-audit.md",
-        "scoring-rubric.md",
-        "output-schema.md",
-    ],
-    "governance_check": [
-        "system-core.md",
-        "governance-check.md",
-        "scoring-rubric.md",
-        "output-schema.md",
-    ],
-    "surprise_audit": [
-        "system-core.md",
-        "surprise-audit.md",
-        "scoring-rubric.md",
-        "output-schema.md",
-    ],
+    "pr_review": ["system-core.md", "pr-review.md"],
+    "security_audit": ["system-core.md", "security-audit.md"],
+    "governance_check": ["system-core.md", "governance-check.md"],
+    "surprise_audit": ["system-core.md", "surprise-audit.md"],
+    "cli": ["system-core.md", "cli-mode.md"],
+    "github_app": ["system-core.md", "github-app.md"],
 }
+
+# Always-on personality + quality gate prompts (all modes)
+SHARED_PROMPTS: list[str] = [
+    "tone-calibration.md",
+    "confidence-filter.md",
+    "escalation.md",
+    "context-builder.md",
+    "catchphrases.md",
+    "disguises.md",
+    "ascii-art.md",
+    "all-clear.md",
+]
+
+# Anchored at the end: scoring rubric then output schema
+CHAIN_SUFFIX: list[str] = ["scoring-rubric.md", "output-schema.md"]
 
 
 def load_prompt_file(prompts_dir: Path, filename: str) -> str:
@@ -48,11 +52,14 @@ def load_identity(prompts_dir: Path) -> str:
 
 
 def load_instructions(prompts_dir: Path, mode: str = "pr_review") -> list[str]:
-    """Load the mode-specific instruction chain.
+    """Load the composed instruction chain for a review mode.
+
+    Composes: MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX.
 
     Returns a list of strings (one per prompt file) for Agno's instructions parameter.
     """
     if mode not in MODE_CHAINS:
         msg = f"Unknown review mode: {mode}. Available: {list(MODE_CHAINS.keys())}"
         raise ValueError(msg)
-    return [load_prompt_file(prompts_dir, f) for f in MODE_CHAINS[mode]]
+    chain = MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX
+    return [load_prompt_file(prompts_dir, f) for f in chain]
