@@ -582,3 +582,58 @@ Design doc and implementation plan updated. Starting implementation now — Task
 **Alpha next session:** Merge #7, #8, #10. Check Bravo's reviews on #9, #11. Then start 13-task implementation on `feat/grippy-pr-ux`.
 
 ---
+
+---
+
+## Bravo — Session 13 (2026-02-27)
+
+**Rebooted as Bravo.** Nelson asked me to address Grippy comments on PRs #9 and #11, then review PR #12.
+
+### PRs #9 and #11 — Grippy findings addressed
+
+**PR #9** (`feat/license-header-pack`):
+- F1 (HIGH) fixed: SPDX pattern `^[A-Za-z0-9][A-Za-z0-9.+-]*$` + `minLength: 1` in schema, `| trim` in template, trimmed conditional. 10 new tests.
+- F2 (MEDIUM): FP — atomic generation in same `nboot apply`.
+- F3 (MEDIUM): FP — consistent with existing tag pinning convention.
+- Round 2: fixed conditional trim, pushed back on repeated FPs.
+- **Merged to main** (squash).
+
+**PR #11** (`fix/grippy-model-hallucination`):
+- F1 (HIGH): FP — `model_id` is single source of truth, no fallback path.
+- F2 (MEDIUM) fixed: added direct `assert review.model` + serialization boundary assertion.
+- **Also fixed scoring bug:** Added `Field(ge=0, le=100)` to all 5 `ScoreBreakdown` fields. LLM was outputting deduction-style negatives.
+- **Merged to main** (squash). Rebased PRs #7, #8, #10, and `feat/grippy-pr-ux`.
+
+### PR #12 — Code review + fixes
+
+Nelson asked for honest assessment before fixing. Read all new code (3664 additions across 16 files).
+
+**Assessment delivered:**
+- Works well: clean module boundaries, graceful degradation, Embedder protocol, dead code cleanup
+- Beautiful: graph data model, FindingLifecycle concept, two-layer comment architecture
+- Issues found: 5 bugs/gaps
+
+**Fixes implemented (commit `792ee97`):**
+
+1. **Semantic bug (critical):** `get_prior_findings` queried current review's ID, returning just-stored findings. Fixed: added `session_id` column to `node_meta` with migration, query BEFORE store, scoped by `pr-{N}`. Nelson chose PR-scoped over repo-scoped.
+
+2. **Duplicate resolution logic:** Nelson chose to keep both — `cross_reference_findings` (graph.py, pure/offline) and `resolve_findings_against_prior` (github_review.py, DB-backed). Added docstring marking intent.
+
+3. **Wired `update_finding_status`:** Nelson chose status tracking without auto-resolving threads (no UI side effects). `post_review` now returns `ResolutionResult`. Resolved findings marked in DB.
+
+4. **Ghost review fix:** Removed `body=""` from `create_review` batch continuation.
+
+5. **CI fixes:** `ruff format` on 4 files, added `types-requests` dev dep. mypy clean.
+
+**548 tests passing, ruff/mypy clean.**
+
+### Deferred to next session
+- **Adversarial audit:** `resolve_threads` GraphQL mutation has string interpolation of `thread_id` (potential injection). `_with_timeout` SIGALRM handler is not re-entrant safe.
+- **Thread auto-resolution:** Built, tested, not wired. Nelson wants to see UX in production first.
+
+### Alpha's next task
+- Check Grippy's re-review on PR #12 (CI should be green now)
+- Address any new findings
+- Continue with remaining open PRs (#7, #8, #10)
+- Start adversarial audit Bravo flagged
+
