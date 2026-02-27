@@ -47,6 +47,9 @@ _CODEBASE_TABLE = "codebase_chunks"
 
 _MAX_RESULT_CHARS = 12_000
 
+# Safety limits for indexing
+_MAX_INDEX_FILES = 5_000
+
 
 # --- Protocols ---
 
@@ -133,15 +136,26 @@ def chunk_file(
     path: Path,
     max_chunk_chars: int = 4000,
     overlap: int = 200,
+    relative_to: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Split a file into chunks for embedding.
 
     Small files (< max_chunk_chars) become a single chunk. Larger files
     are split into overlapping character windows with line-boundary alignment.
 
+    Args:
+        path: Absolute path to the file.
+        max_chunk_chars: Maximum characters per chunk.
+        overlap: Character overlap between consecutive chunks.
+        relative_to: If set, store paths relative to this root.
+
     Returns:
         List of chunk dicts: {file_path, chunk_index, start_line, end_line, text}.
     """
+    # Clamp overlap to prevent infinite loop (Grippy finding ce876a2c4097)
+    if overlap >= max_chunk_chars:
+        overlap = max(0, max_chunk_chars - 1)
+
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -150,7 +164,13 @@ def chunk_file(
     if not text.strip():
         return []
 
-    rel_path = str(path)
+    if relative_to is not None:
+        try:
+            rel_path = str(path.relative_to(relative_to))
+        except ValueError:
+            rel_path = str(path)
+    else:
+        rel_path = str(path)
     lines = text.splitlines(keepends=True)
 
     if len(text) <= max_chunk_chars:
@@ -238,12 +258,19 @@ class CodebaseIndex:
             if not root.exists():
                 continue
             if root.is_file():
-                file_chunks = chunk_file(root)
+                file_chunks = chunk_file(root, relative_to=self._repo_root)
                 all_chunks.extend(file_chunks)
             else:
                 files = walk_source_files(root, self._extensions, self._ignore_dirs)
+                if len(files) > _MAX_INDEX_FILES:
+                    log.warning(
+                        "Capping indexing at %d files (found %d)",
+                        _MAX_INDEX_FILES,
+                        len(files),
+                    )
+                    files = files[:_MAX_INDEX_FILES]
                 for f in files:
-                    file_chunks = chunk_file(f)
+                    file_chunks = chunk_file(f, relative_to=self._repo_root)
                     all_chunks.extend(file_chunks)
 
         if not all_chunks:
@@ -336,6 +363,7 @@ def _make_grep_code(repo_root: Path) -> Any:
             cmd = [
                 "grep",
                 "-rn",
+                "--max-count=50",
                 f"--include={glob}",
                 f"-C{context_lines}",
                 "-E",

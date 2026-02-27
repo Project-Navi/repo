@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -178,6 +179,23 @@ class TestChunkFile:
         assert chunks[0]["start_line"] == 1
         assert chunks[0]["end_line"] >= 3
 
+    def test_overlap_clamped_when_too_large(self, tmp_path: Path) -> None:
+        """overlap >= max_chunk_chars doesn't cause infinite loop."""
+        big_file = tmp_path / "big.py"
+        big_file.write_text("x = 1\n" * 2000)
+        chunks = chunk_file(big_file, max_chunk_chars=100, overlap=200)
+        assert len(chunks) > 1  # Should still produce chunks, not loop forever
+
+    def test_relative_to_produces_relative_paths(self, tmp_repo: Path) -> None:
+        path = tmp_repo / "src" / "main.py"
+        chunks = chunk_file(path, relative_to=tmp_repo)
+        assert chunks[0]["file_path"] == "src/main.py"
+
+    def test_without_relative_to_uses_full_path(self, tmp_repo: Path) -> None:
+        path = tmp_repo / "src" / "main.py"
+        chunks = chunk_file(path)
+        assert chunks[0]["file_path"] == str(path)
+
 
 # --- CodebaseIndex tests ---
 
@@ -224,6 +242,19 @@ class TestCodebaseIndex:
         count = idx.build()
         # Only src/ files: main.py, utils.py
         assert count == 2
+
+    def test_build_stores_relative_paths(
+        self, tmp_repo: Path, lance_db: Any, mock_embedder: MagicMock
+    ) -> None:
+        idx = CodebaseIndex(repo_root=tmp_repo, lance_db=lance_db, embedder=mock_embedder)
+        idx.build()
+        results = idx.search("hello")
+        assert results
+        # Paths should be relative, not absolute
+        for r in results:
+            assert not r["file_path"].startswith("/"), (
+                f"Expected relative path, got {r['file_path']}"
+            )
 
     def test_build_empty_dir(self, tmp_path: Path, lance_db: Any, mock_embedder: MagicMock) -> None:
         empty = tmp_path / "empty_repo"
@@ -351,11 +382,12 @@ class TestGrepCodeTool:
 
     def test_timeout_handling(self, tmp_repo: Path) -> None:
         grep = _make_grep_code(tmp_repo)
-        with patch("grippy.codebase.subprocess.run", side_effect=TimeoutError):
-            # subprocess.TimeoutExpired is what actually gets raised
-            pass
-        # Just verify the function exists and is callable
-        assert callable(grep)
+        with patch(
+            "grippy.codebase.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="grep", timeout=10),
+        ):
+            result = grep("pattern")
+        assert "timed out" in result.lower()
 
 
 # --- read_file tool tests ---
