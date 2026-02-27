@@ -2,8 +2,13 @@
   "name": "navi-bootstrap",
   "version": "0.1.0",
   "description": "Jinja2 rendering engine and template packs for bootstrapping projects to navi-os-grade posture",
+  "license": "MIT",
   "language": "python",
   "python_version": "3.12",
+
+  "author": {
+    "name": "Nelson Spencer"
+  },
 
   "structure": {
     "src_dir": "src/navi_bootstrap",
@@ -12,7 +17,11 @@
 
   "dependencies": {
     "runtime": ["click", "jinja2", "pyyaml", "jsonschema"],
-    "dev": ["pytest", "pytest-cov", "ruff", "mypy"],
+    "dev": [
+      "pytest", "pytest-cov", "ruff", "mypy", "bandit",
+      "agno", "lancedb", "PyGithub", "sqlalchemy",
+      "types-jsonschema", "types-PyYAML"
+    ],
     "optional": {}
   },
 
@@ -32,11 +41,18 @@
 
   "recon": {
     "test_framework": "pytest",
-    "test_count": 471,
+    "test_count": 490,
     "coverage_pct": 89,
     "python_test_versions": ["3.12", "3.13"],
     "codeql_languages": ["python"],
-    "existing_ci": ["tests.yml"],
+    "existing_ci": [
+      "_build-reusable.yml",
+      "codeql.yml",
+      "grippy-review.yml",
+      "release.yml",
+      "scorecard.yml",
+      "tests.yml"
+    ],
     "existing_tools": {
       "ruff": true,
       "mypy": true,
@@ -46,6 +62,6 @@
     },
     "has_pyproject_toml": true,
     "has_github_dir": true,
-    "updated_at": "2026-02-26T00:00:00+00:00"
+    "updated_at": "2026-02-27T00:00:00+00:00"
   }
 }
