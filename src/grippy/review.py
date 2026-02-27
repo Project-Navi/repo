@@ -362,21 +362,37 @@ def main() -> None:
     # 7. Post review with inline comments + summary dashboard
     head_sha = pr_event.get("head_sha", "")
     print("Posting review...")
-    resolution = post_review(
-        token=token,
-        repo=pr_event["repo"],
-        pr_number=pr_event["pr_number"],
-        findings=review.findings,
-        prior_findings=prior_findings,
-        head_sha=head_sha,
-        diff=diff,
-        score=review.score.overall,
-        verdict=review.verdict.status.value,
-    )
-    print("  Done.")
+    resolution = None
+    try:
+        resolution = post_review(
+            token=token,
+            repo=pr_event["repo"],
+            pr_number=pr_event["pr_number"],
+            findings=review.findings,
+            prior_findings=prior_findings,
+            head_sha=head_sha,
+            diff=diff,
+            score=review.score.overall,
+            verdict=review.verdict.status.value,
+        )
+        print("  Done.")
+    except Exception as exc:
+        print(f"::warning::Failed to post review: {exc}")
+        try:
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                f"## Grippy Review\n\n**Review completed** (score: "
+                f"{review.score.overall}/100, {review.verdict.status.value}) "
+                f"but **failed to post inline comments**: {exc}\n\n"
+                f"<!-- grippy-error -->",
+            )
+        except Exception:
+            pass  # Don't mask the original error
 
     # 8. Update resolved finding status in graph DB (non-fatal)
-    if resolution.resolved and store is not None:
+    if resolution is not None and resolution.resolved and store is not None:
         try:
             for resolved in resolution.resolved:
                 store.update_finding_status(resolved["node_id"], "resolved")

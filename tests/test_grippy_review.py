@@ -970,6 +970,149 @@ class TestMainReviewIntegration:
         mock_post.assert_called_once()
 
 
+# --- post_review failure handling (Commit 5, Issue #6) ---
+
+
+class TestMainPostReviewFailure:
+    """main() should gracefully handle post_review failures."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 1,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat", "sha": "abc123"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(
+        self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_posts_error_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review failure -> error comment posted, exit based on verdict."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        main()  # verdict is not merge-blocking, so should exit 0
+
+        mock_post_comment.assert_called_once()
+        body = mock_post_comment.call_args[0][3]
+        assert "failed to post inline comments" in body.lower() or "failed to post" in body.lower()
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_still_exits_merge_blocking(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review fails + merge-blocking verdict -> exit 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review(
+            verdict=Verdict(
+                status=VerdictStatus.FAIL,
+                threshold_applied=70,
+                merge_blocking=True,
+                summary="Critical issues found.",
+            ),
+        )
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_graceful_on_pass(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review fails + PASS verdict -> exit 0."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()  # default is non-blocking
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        # Should NOT raise — non-blocking verdict, posting failure is non-fatal
+        main()
+
+
 class TestTransportErrorUX:
     """Invalid GRIPPY_TRANSPORT posts error comment and exits."""
 
