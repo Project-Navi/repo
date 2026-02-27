@@ -7,7 +7,7 @@
     "name": { "type": "string", "minLength": 1 },
     "version": { "type": "string" },
     "description": { "type": "string" },
-    "license": { "type": "string" },
+    "license": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*$" },
     "language": { "type": "string", "enum": ["python", "typescript", "go", "rust"] },
     "python_version": { "type": "string", "pattern": "^3\\.[0-9]+$" },
     "author": {

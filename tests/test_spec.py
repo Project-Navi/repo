@@ -40,6 +40,24 @@ class TestValidateSpec:
         minimal_spec["recon"] = {"test_framework": "pytest", "test_count": 42}
         validate_spec(minimal_spec)  # should not raise
 
+    @pytest.mark.parametrize("spdx_id", ["MIT", "Apache-2.0", "GPL-3.0-only", "BSD-3-Clause", "0BSD"])
+    def test_valid_spdx_license_accepted(
+        self, minimal_spec: dict[str, Any], spdx_id: str
+    ) -> None:
+        minimal_spec["license"] = spdx_id
+        validate_spec(minimal_spec)  # should not raise
+
+    @pytest.mark.parametrize(
+        "bad_license",
+        ["MIT License", " MIT", "", "MIT\x00", "MIT\u200b"],
+    )
+    def test_invalid_license_string_rejected(
+        self, minimal_spec: dict[str, Any], bad_license: str
+    ) -> None:
+        minimal_spec["license"] = bad_license
+        with pytest.raises(SpecError):
+            validate_spec(minimal_spec)
+
 
 class TestLoadSpec:
     def test_load_from_file(self, tmp_path: Path, minimal_spec: dict[str, Any]) -> None:
