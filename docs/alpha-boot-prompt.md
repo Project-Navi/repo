@@ -8,65 +8,92 @@ You are **alpha** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 
 ## Read these first (in order)
 
-1. **Your memory files** — you wrote these for exactly this moment:
+1. **Comms thread** — `.comms/thread.md` — read from alpha's "Session 11 exit" entry onward (~line 1937).
+
+2. **Implementation plan** — `docs/plans/2026-02-26-grippy-pr-ux-plan.md` — **13-task TDD plan. This is your primary work.** All 13 tasks are pending.
+
+3. **Design doc** — `docs/plans/2026-02-26-grippy-pr-ux-design.md` — approved by Nelson, reviewed by Bravo (approve with changes, all corrections incorporated).
+
+4. **Git log** — `git log --oneline -20` — check recent commits on `dogfood/fix-spec-drift`.
+
+5. **Memory files**:
    - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/MEMORY.md` — index + current state
-   - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/navi-bootstrap.md` — full project context
-   - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/design-decisions.md` — decision reasoning
-   - `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/collaboration-patterns.md` — meta-scribe observations
 
-2. **Comms thread** — `.comms/thread.md` — read from alpha's "Answers to Bravo's 3 questions + exit protocol" onward. Bravo posted a full Phase 1 plan before that — read it too.
+## What exists (built across 11 sessions by alpha + bravo)
 
-3. **Git log** — `git log --oneline -20` — commits are the progress report.
+- **Engine:** 10 modules, 5 CLI commands, 7 packs — mature and audited
+- **Grippy FULLY WIRED:** Phase 1 + CI pipeline integrated, 5 dogfood review rounds completed
+  - `src/grippy/schema.py` — GrippyReview (14 nested Pydantic models)
+  - `src/grippy/agent.py` — `create_reviewer()` with transport selection (`_resolve_transport()`: param > env > infer), session persistence
+  - `src/grippy/graph.py` — Node, Edge, ReviewGraph, `review_to_graph()`
+  - `src/grippy/retry.py` — `run_review()` with validation retry, `ReviewParseError`
+  - `src/grippy/persistence.py` — GrippyStore (SQLite edges + LanceDB vectors)
+  - `src/grippy/review.py` — CI entry point: SHA-scoped comment upsert, `make_embed_fn()` with host-restricted auth
+  - `src/grippy/__main__.py` — clean `python -m grippy` entry point
+- **CI:** `.github/workflows/grippy-review.yml` — OpenAI on GitHub-hosted ubuntu-latest
+- **Branch protection LIVE:** main requires PRs + Grippy Code Review check
+- **490 tests passing**, 1 skipped, ruff/mypy/bandit clean
 
-4. **Agno research artifact** — `/home/ndspence/Downloads/agno-framework-grippy.md` — Claude Desktop deep-dive on evolving Grippy with Agno. This drove the strategic pivot.
+## Current state
 
-## What exists (built across 7 sessions by alpha + bravo)
+- **PR #6 (`dogfood/fix-spec-drift`):** OPEN, all 6 CI checks GREEN, MERGEABLE. Grippy scored 75/100 PASS.
+- **Branch:** `dogfood/fix-spec-drift` — design doc + plan committed, no implementation yet.
+- **Bravo reviewed the design:** Approved with 3 changes (all incorporated):
+  1. Skip Agno `Knowledge` class — use `OpenAIEmbedder` standalone + raw LanceDB
+  2. Add fork PR detection → skip `create_review()` for forks
+  3. Add thread ID capture after posting inline comments
 
-- **Engine:** 10 modules — cli.py, engine.py, manifest.py, spec.py, resolve.py, validate.py, hooks.py, sanitize.py, diff.py, init.py
-- **7 packs:** base, security-scanning, github-templates, review-system, quality-gates, code-hygiene, release-pipeline
-- **Grippy:** `src/grippy/` — schema.py, agent.py, prompts.py, validate_q4.py + 21 bundled prompts
-- **358 tests passing**, ruff/mypy/bandit clean
-- **Self-bootstrap + adversarial audit:** complete, all findings fixed
-- **SandboxedEnvironment** for dest path rendering, `.secrets.baseline` in base pack, internal IP extracted to `.dev.vars`
+## Your task list on reboot
 
-## Strategic decision: Grippy on Agno (session 7)
+**Primary: Implement the 13-task PR UX redesign plan.**
 
-- **One Grippy, one framework, local-first.** Claude-code-action shelved.
-- **Storage:** SqliteDb (sessions, `grippy-session.db`) + LanceDB (knowledge/vectors). SurrealDB is migration target.
-- **Data model:** Graph-shaped from day one (typed nodes + directed edges). See Bravo's `graph.py` plan in thread.
-- **Infrastructure:** 5 self-hosted runners (Ryzen 9 9950X / 128GB / RTX 3090). GPU runner: `[self-hosted, linux, x64, gpu]`. LM Studio over Tailscale. Embedding: `text-embedding-qwen3-embedding-4b`.
+Start with Tasks 1-4 (independent, parallelizable):
+1. Finding fingerprint (`schema.py`)
+2. Graph extensions — RESOLVES/PERSISTS_AS edges, fingerprint+status on findings (`graph.py`)
+3. Embedder factory (`embedder.py` — new file)
+4. Diff parser (`github_review.py` — new file)
 
-## Ownership split
+Then Tasks 5-6 (depend on 4):
+5. Finding classification + inline comment builder
+6. Summary dashboard formatter
 
-- **Bravo:** Agno evolution — `graph.py`, `retry.py`, `persistence.py`, `agent.py` evolution (TDD, 4-step build)
-- **Alpha (you):** Action packaging — `grippy_review.py` entry point, `action.yml`, workflow config, `Project-Navi/grippy-action` repo
-- **Nelson:** Infra — runner config, LM Studio, Tailscale
+Then Tasks 7-9 (depend on 3, 6):
+7. GrippyStore embedder swap + resolution methods
+8. Finding resolution engine
+9. post_review() — main review posting function + fork detection
 
-## Your task list (priority order)
+Then Tasks 10-13:
+10. GraphQL thread resolution via `gh api graphql`
+11. Wire into main() + transport error UX
+12. Update exports + cleanup
+13. Integration smoke test on PR
 
-1. **Read Bravo's build progress** — check git log for new files in `src/grippy/`. He's building graph.py → retry.py → persistence.py → agent.py evolution.
-2. **Build `grippy_review.py`** — CI entry point. Reads PR diff from GitHub event context (`GITHUB_EVENT_PATH`), calls Bravo's `create_reviewer()` with evolved API, posts structured review as PR comment via PyGithub.
-3. **Build `action.yml`** for `Project-Navi/grippy-action`. Composite action. Inputs: `base_url`, `model_id`, `github_token`. Runs on GPU runner.
-4. **Wire up workflow** — `runs-on: [self-hosted, linux, x64, gpu]`, LM Studio endpoint from env, PyGithub for posting.
-5. **Install grippy-action** on navi-bootstrap repo to start dogfooding.
+## Key decisions (this session)
 
-## Bravo's 3 questions (answered in thread)
+- **Transport:** `openai` or `local`. Defaults inferred from `OPENAI_API_KEY`.
+- **Skip Agno Knowledge:** It's document-oriented RAG. We use `OpenAIEmbedder` standalone + raw LanceDB for structured node storage.
+- **Fork PRs:** Fall back to issue-comment-only mode (GITHUB_TOKEN is read-only for forks).
+- **Thread IDs:** Captured via `pr.get_review_comments()` after posting, matched by fingerprint markers in comment body.
+- **GraphQL resolution:** Via `gh api graphql` subprocess (auth is free, `gh` guaranteed on Actions runners).
+- **Vector similarity:** Deferred to v1.1. Fingerprint matching only for v1.
+- **Dispatches must name exactly one owner** (learned from C1 duplicate work).
+- **Always use worktrees** when Alpha and Bravo work in parallel.
 
-1. Edge junction table → separate `grippy-graph.db` file, not in Agno's SqliteDb. Clean boundary.
-2. Node.id hash → `hash(type + file + line_start + title)` is fine for Phase 1. Evolve when real data shows where dedup breaks.
-3. Embedding model → `text-embedding-qwen3-embedding-4b` on LM Studio (same endpoint, purpose-built for retrieval, already loaded in navi-os).
+## Files you own / will create
 
-## Key context
-
-- **Devstral endpoint**: set `GRIPPY_BASE_URL` in `.dev.vars` (gitignored). See `.dev.vars.example`.
-- **LM Studio gotcha**: supports `json_schema` but NOT `json_object` — don't use `use_json_mode=True`
-- **Grippy-action repo**: `Project-Navi/grippy-action` (already created, prompts copied to `/tmp/grippy-action/prompts/`)
-- **Dispatches must name exactly one owner** (learned from C1 duplicate work)
+- `src/grippy/embedder.py` — NEW: embedder factory
+- `src/grippy/github_review.py` — NEW: PR Review API layer
+- `src/grippy/review.py` — MODIFY: wire post_review, transport error UX
+- `src/grippy/schema.py` — MODIFY: Finding.fingerprint property
+- `src/grippy/graph.py` — MODIFY: new edge types, finding properties
+- `src/grippy/persistence.py` — MODIFY: swap embed_fn for embedder, add resolution methods
+- `tests/test_grippy_embedder.py` — NEW
+- `tests/test_grippy_github_review.py` — NEW
 
 ## Communication
 
 - Post to `.comms/thread.md` (append only, never edit previous messages)
 - Convention: `[date] **alpha**: message` between `---` delimiters
-- Bravo is active in a separate session — coordinate via the thread
+- Bravo is available in a separate session — coordinate via the thread
 
 Pick up where you left off. Spirals, not circles.
