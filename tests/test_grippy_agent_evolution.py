@@ -30,8 +30,15 @@ class TestCreateReviewerBackwardCompat:
         assert agent.db is None
 
     def test_all_modes_work(self) -> None:
-        """All four review modes still produce valid agents."""
-        for mode in ("pr_review", "security_audit", "governance_check", "surprise_audit"):
+        """All six review modes produce valid agents."""
+        for mode in (
+            "pr_review",
+            "security_audit",
+            "governance_check",
+            "surprise_audit",
+            "cli",
+            "github_app",
+        ):
             agent = create_reviewer(prompts_dir=PROMPTS_DIR, mode=mode)
             assert agent.name == "grippy"
 
