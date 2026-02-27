@@ -241,9 +241,15 @@ class TestFormatSummary:
         from grippy.github_review import format_summary_comment
 
         result = format_summary_comment(
-            score=85, verdict="PASS", finding_count=3,
-            new_count=2, persists_count=1, resolved_count=0,
-            off_diff_findings=[], head_sha="abc123", pr_number=6,
+            score=85,
+            verdict="PASS",
+            finding_count=3,
+            new_count=2,
+            persists_count=1,
+            resolved_count=0,
+            off_diff_findings=[],
+            head_sha="abc123",
+            pr_number=6,
         )
         assert "85/100" in result
         assert "PASS" in result
@@ -252,9 +258,15 @@ class TestFormatSummary:
         from grippy.github_review import format_summary_comment
 
         result = format_summary_comment(
-            score=75, verdict="PASS", finding_count=4,
-            new_count=2, persists_count=1, resolved_count=3,
-            off_diff_findings=[], head_sha="abc123", pr_number=6,
+            score=75,
+            verdict="PASS",
+            finding_count=4,
+            new_count=2,
+            persists_count=1,
+            resolved_count=3,
+            off_diff_findings=[],
+            head_sha="abc123",
+            pr_number=6,
         )
         assert "2 new" in result
         assert "1 persists" in result
@@ -264,9 +276,15 @@ class TestFormatSummary:
         from grippy.github_review import format_summary_comment
 
         result = format_summary_comment(
-            score=80, verdict="PASS", finding_count=0,
-            new_count=0, persists_count=0, resolved_count=0,
-            off_diff_findings=[], head_sha="abc", pr_number=6,
+            score=80,
+            verdict="PASS",
+            finding_count=0,
+            new_count=0,
+            persists_count=0,
+            resolved_count=0,
+            off_diff_findings=[],
+            head_sha="abc",
+            pr_number=6,
         )
         assert "<!-- grippy-summary-6 -->" in result
 
@@ -275,9 +293,15 @@ class TestFormatSummary:
 
         off_diff = [_make_finding(file="config.yaml", line_start=99)]
         result = format_summary_comment(
-            score=70, verdict="PASS", finding_count=1,
-            new_count=1, persists_count=0, resolved_count=0,
-            off_diff_findings=off_diff, head_sha="abc", pr_number=6,
+            score=70,
+            verdict="PASS",
+            finding_count=1,
+            new_count=1,
+            persists_count=0,
+            resolved_count=0,
+            off_diff_findings=off_diff,
+            head_sha="abc",
+            pr_number=6,
         )
         assert "<details>" in result
         assert "config.yaml" in result
@@ -346,9 +370,7 @@ class TestPostReview:
     """post_review creates PR review with inline comments + summary."""
 
     @patch("grippy.github_review.Github")
-    def test_creates_review_with_inline_comments(
-        self, mock_github_cls: MagicMock
-    ) -> None:
+    def test_creates_review_with_inline_comments(self, mock_github_cls: MagicMock) -> None:
         from grippy.github_review import post_review
 
         mock_pr = MagicMock()
@@ -370,9 +392,15 @@ class TestPostReview:
         findings = [_make_finding(file="src/app.py", line_start=9)]
 
         post_review(
-            token="test-token", repo="org/repo", pr_number=1,
-            findings=findings, prior_findings=[], head_sha="abc123",
-            diff=diff, score=80, verdict="PASS",
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=findings,
+            prior_findings=[],
+            head_sha="abc123",
+            diff=diff,
+            score=80,
+            verdict="PASS",
         )
 
         mock_pr.create_review.assert_called_once()
@@ -381,9 +409,7 @@ class TestPostReview:
         assert len(call_kwargs.kwargs["comments"]) == 1
 
     @patch("grippy.github_review.Github")
-    def test_off_diff_findings_in_summary_only(
-        self, mock_github_cls: MagicMock
-    ) -> None:
+    def test_off_diff_findings_in_summary_only(self, mock_github_cls: MagicMock) -> None:
         from grippy.github_review import post_review
 
         mock_pr = MagicMock()
@@ -400,9 +426,15 @@ class TestPostReview:
         findings = [_make_finding(file="src/app.py", line_start=99)]  # not in diff
 
         post_review(
-            token="test-token", repo="org/repo", pr_number=1,
-            findings=findings, prior_findings=[], head_sha="abc123",
-            diff=diff, score=70, verdict="PASS",
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=findings,
+            prior_findings=[],
+            head_sha="abc123",
+            diff=diff,
+            score=70,
+            verdict="PASS",
         )
 
         mock_pr.create_review.assert_not_called()
@@ -422,18 +454,22 @@ class TestPostReview:
         mock_pr.get_issue_comments.return_value = [existing_comment]
 
         post_review(
-            token="test-token", repo="org/repo", pr_number=1,
-            findings=[], prior_findings=[], head_sha="abc",
-            diff="", score=90, verdict="PASS",
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[],
+            prior_findings=[],
+            head_sha="abc",
+            diff="",
+            score=90,
+            verdict="PASS",
         )
 
         existing_comment.edit.assert_called_once()
         mock_pr.create_issue_comment.assert_not_called()
 
     @patch("grippy.github_review.Github")
-    def test_fork_pr_skips_inline_comments(
-        self, mock_github_cls: MagicMock
-    ) -> None:
+    def test_fork_pr_skips_inline_comments(self, mock_github_cls: MagicMock) -> None:
         """Fork PRs put all findings in summary, no inline review."""
         from grippy.github_review import post_review
 
@@ -451,9 +487,15 @@ class TestPostReview:
         findings = [_make_finding(file="src/app.py", line_start=9)]
 
         post_review(
-            token="test-token", repo="org/repo", pr_number=1,
-            findings=findings, prior_findings=[], head_sha="abc",
-            diff=diff, score=75, verdict="PASS",
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=findings,
+            prior_findings=[],
+            head_sha="abc",
+            diff=diff,
+            score=75,
+            verdict="PASS",
         )
 
         mock_pr.create_review.assert_not_called()

@@ -62,9 +62,15 @@ CREATE TABLE IF NOT EXISTS node_meta (
     label TEXT NOT NULL,
     properties TEXT NOT NULL DEFAULT '{}',
     review_id TEXT,
+    session_id TEXT,
     created_at TEXT NOT NULL
 )
 """
+
+_MIGRATIONS = [
+    # v1.1: add session_id for PR-scoped finding lifecycle
+    "ALTER TABLE node_meta ADD COLUMN session_id TEXT",
+]
 
 
 class GrippyStore:
@@ -98,6 +104,11 @@ class GrippyStore:
         for idx_sql in _EDGE_INDEXES_SQL:
             cur.execute(idx_sql)
         cur.execute(_NODE_META_TABLE_SQL)
+        for migration in _MIGRATIONS:
+            try:
+                cur.execute(migration)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
         self._conn.commit()
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
@@ -111,25 +122,26 @@ class GrippyStore:
 
     # --- Store ---
 
-    def store_review(self, graph: ReviewGraph) -> None:
+    def store_review(self, graph: ReviewGraph, *, session_id: str = "") -> None:
         """Persist a ReviewGraph — edges to SQLite, nodes to LanceDB."""
-        self._store_edges(graph)
+        self._store_edges(graph, session_id=session_id)
         self._store_nodes(graph)
 
-    def _store_edges(self, graph: ReviewGraph) -> None:
+    def _store_edges(self, graph: ReviewGraph, *, session_id: str = "") -> None:
         cur = self._conn.cursor()
         for node in graph.nodes:
             # Store node metadata
             cur.execute(
                 "INSERT OR IGNORE INTO node_meta "
-                "(node_id, node_type, label, properties, review_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(node_id, node_type, label, properties, review_id, session_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     node.id,
                     node.type.value,
                     node.label,
                     json.dumps(node.properties),
                     node.source_review_id,
+                    session_id,
                     node.created_at,
                 ),
             )
@@ -326,13 +338,16 @@ class GrippyStore:
 
     # --- Resolution queries ---
 
-    def get_prior_findings(self, review_id: str) -> list[dict[str, Any]]:
-        """Get open findings from a specific review."""
+    def get_prior_findings(self, *, session_id: str) -> list[dict[str, Any]]:
+        """Get open findings for a PR session.
+
+        Call BEFORE store_review() so only prior round findings are returned.
+        """
         cur = self._conn.cursor()
         cur.execute(
             "SELECT node_id, label, properties FROM node_meta "
-            "WHERE node_type = ? AND review_id = ?",
-            (NodeType.FINDING.value, review_id),
+            "WHERE node_type = ? AND session_id = ?",
+            (NodeType.FINDING.value, session_id),
         )
         results = []
         for row in cur.fetchall():

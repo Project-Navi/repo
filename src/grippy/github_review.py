@@ -206,9 +206,7 @@ def format_summary_comment(
     # Off-diff findings
     if off_diff_findings:
         lines.append("<details>")
-        lines.append(
-            f"<summary>Off-diff findings ({len(off_diff_findings)})</summary>"
-        )
+        lines.append(f"<summary>Off-diff findings ({len(off_diff_findings)})</summary>")
         lines.append("")
         for f in off_diff_findings:
             sev_emoji = _SEVERITY_EMOJI.get(f.severity.value, "\u26aa")
@@ -308,7 +306,7 @@ def post_review(
     diff: str,
     score: int,
     verdict: str,
-) -> None:
+) -> ResolutionResult:
     """Post Grippy review as inline comments + summary dashboard.
 
     Args:
@@ -321,6 +319,9 @@ def post_review(
         diff: Full PR diff text.
         score: Overall review score.
         verdict: PASS, FAIL, or PROVISIONAL.
+
+    Returns:
+        ResolutionResult for callers to update finding status in the store.
     """
     gh = Github(token)
     repository = gh.get_repo(repo)
@@ -351,7 +352,6 @@ def post_review(
         for i in range(0, len(comments), _REVIEW_BATCH_SIZE):
             batch = comments[i : i + _REVIEW_BATCH_SIZE]
             pr.create_review(
-                body="" if i > 0 else None,  # type: ignore[arg-type]
                 event="COMMENT",
                 comments=batch,  # type: ignore[arg-type]
             )
@@ -374,9 +374,10 @@ def post_review(
     for comment in pr.get_issue_comments():
         if marker in comment.body:
             comment.edit(summary)
-            return
+            return resolution
 
     pr.create_issue_comment(summary)
+    return resolution
 
 
 # --- Thread resolution ---

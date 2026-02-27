@@ -336,16 +336,52 @@ class TestResolutionQueries:
         """get_prior_findings returns findings with status='open'."""
         review = _make_review()
         graph = review_to_graph(review)
-        store.store_review(graph)
-        findings = store.get_prior_findings(review_id=graph.review_id)
+        store.store_review(graph, session_id="pr-1")
+        findings = store.get_prior_findings(session_id="pr-1")
         assert len(findings) > 0
         for f in findings:
             assert f["status"] == "open"
 
     def test_get_prior_findings_empty_when_no_reviews(self, store: GrippyStore) -> None:
         """No stored reviews -> empty list."""
-        findings = store.get_prior_findings(review_id="nonexistent")
+        findings = store.get_prior_findings(session_id="pr-nonexistent")
         assert findings == []
+
+    def test_get_prior_findings_scoped_by_session(self, store: GrippyStore) -> None:
+        """Prior findings are scoped to session_id (PR), not individual review."""
+        # Round 1: store with session_id
+        review_r1 = _make_review(
+            title="feat: auth",
+            timestamp="2026-02-26T12:00:00Z",
+            findings=[_make_finding(title="SQL injection", file="auth.py")],
+        )
+        graph_r1 = review_to_graph(review_r1)
+        store.store_review(graph_r1, session_id="pr-5")
+
+        # Round 2: query BEFORE storing — should see round 1's findings
+        prior = store.get_prior_findings(session_id="pr-5")
+        assert len(prior) == 1
+        assert prior[0]["title"] == "SQL injection"
+
+    def test_prior_findings_excludes_other_sessions(self, store: GrippyStore) -> None:
+        """Findings from different PRs are not returned."""
+        review_pr5 = _make_review(
+            title="PR 5",
+            timestamp="2026-02-26T12:00:00Z",
+            findings=[_make_finding(title="Bug in PR 5", file="a.py")],
+        )
+        review_pr6 = _make_review(
+            title="PR 6",
+            timestamp="2026-02-26T12:01:00Z",
+            findings=[_make_finding(title="Bug in PR 6", file="b.py")],
+        )
+        store.store_review(review_to_graph(review_pr5), session_id="pr-5")
+        store.store_review(review_to_graph(review_pr6), session_id="pr-6")
+
+        prior_5 = store.get_prior_findings(session_id="pr-5")
+        prior_6 = store.get_prior_findings(session_id="pr-6")
+        assert all(f["title"] == "Bug in PR 5" for f in prior_5)
+        assert all(f["title"] == "Bug in PR 6" for f in prior_6)
 
     def test_update_finding_status(self, store: GrippyStore) -> None:
         """update_finding_status changes a finding's status in node_meta."""

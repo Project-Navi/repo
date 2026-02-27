@@ -440,7 +440,7 @@ class TestMainWiringNewAPI:
         main()
 
         mock_store_cls.assert_called_once()
-        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph, session_id="pr-1")
 
     @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
@@ -683,7 +683,7 @@ class TestMainOrchestration:
         mock_post_review.assert_called_once()
 
         # Graph was persisted
-        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph, session_id="pr-7")
 
     @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")

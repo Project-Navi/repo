@@ -216,7 +216,11 @@ def cross_reference_findings(
     current: list[Finding],
     previous: list[Finding],
 ) -> FindingLifecycle:
-    """Compare current vs previous findings by fingerprint.
+    """Compare current vs previous findings by fingerprint (pure, no DB).
+
+    For offline/CLI analysis of two GrippyReview objects. The DB-backed
+    version used in CI is resolve_findings_against_prior() in github_review.py,
+    which carries node_id for thread resolution and status updates.
 
     Returns a FindingLifecycle with:
     - new: findings in current but not previous

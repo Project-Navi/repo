@@ -332,8 +332,10 @@ def main() -> None:
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
-    # 6. Build graph, persist, get prior findings (non-fatal)
+    # 6. Build graph, get prior findings, THEN persist (non-fatal)
+    session_id = f"pr-{pr_event['pr_number']}"
     prior_findings: list[dict[str, Any]] = []
+    store: GrippyStore | None = None
     print("Persisting review graph...")
     try:
         embedder = create_embedder(
@@ -347,20 +349,20 @@ def main() -> None:
             lance_dir=data_dir / "lance",
             embedder=embedder,
         )
-        store.store_review(graph)
-        print(f"  Graph: {len(graph.nodes)} nodes persisted")
-        # Get prior findings for resolution
+        # Query prior findings BEFORE storing current round
         try:
-            prior_findings = store.get_prior_findings(review_id=graph.review_id)
+            prior_findings = store.get_prior_findings(session_id=session_id)
         except Exception:
             prior_findings = []
+        store.store_review(graph, session_id=session_id)
+        print(f"  Graph: {len(graph.nodes)} nodes persisted")
     except Exception as exc:
         print(f"::warning::Graph persistence failed: {exc}")
 
     # 7. Post review with inline comments + summary dashboard
     head_sha = pr_event.get("head_sha", "")
     print("Posting review...")
-    post_review(
+    resolution = post_review(
         token=token,
         repo=pr_event["repo"],
         pr_number=pr_event["pr_number"],
@@ -372,6 +374,15 @@ def main() -> None:
         verdict=review.verdict.status.value,
     )
     print("  Done.")
+
+    # 8. Update resolved finding status in graph DB (non-fatal)
+    if resolution.resolved and store is not None:
+        try:
+            for resolved in resolution.resolved:
+                store.update_finding_status(resolved["node_id"], "resolved")
+            print(f"  Marked {len(resolution.resolved)} findings as resolved")
+        except Exception as exc:
+            print(f"::warning::Failed to update finding status: {exc}")
 
     # 8. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")

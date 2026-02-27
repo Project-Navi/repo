@@ -293,15 +293,25 @@ class TestFindingFingerprint:
 
     def test_fingerprint_is_deterministic(self) -> None:
         """Same file + category + title -> same fingerprint."""
-        f1 = Finding(**_minimal_finding(
-            id="F-001", file="src/auth.py", category="security",
-            title="SQL injection risk",
-        ))
-        f2 = Finding(**_minimal_finding(
-            id="F-002", severity="MEDIUM", confidence=70,
-            file="src/auth.py", category="security",
-            title="SQL injection risk", description="different",
-        ))
+        f1 = Finding(
+            **_minimal_finding(
+                id="F-001",
+                file="src/auth.py",
+                category="security",
+                title="SQL injection risk",
+            )
+        )
+        f2 = Finding(
+            **_minimal_finding(
+                id="F-002",
+                severity="MEDIUM",
+                confidence=70,
+                file="src/auth.py",
+                category="security",
+                title="SQL injection risk",
+                description="different",
+            )
+        )
         assert f1.fingerprint == f2.fingerprint
 
     def test_fingerprint_stable_across_line_changes(self) -> None:
