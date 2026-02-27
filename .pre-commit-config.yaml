@@ -44,7 +44,7 @@ repos:
     rev: 1.9.3
     hooks:
       - id: bandit
-        args: [-r, src/navi_bootstrap, -ll, -q]
+        args: [-r, "src/navi_bootstrap", -ll, -q]
         files: ^src\/navi_bootstrap/
         pass_filenames: false
 
