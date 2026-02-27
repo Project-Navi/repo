@@ -68,19 +68,19 @@ Packs never modify source code, never make governance decisions, and never fix p
 
 ## Grippy
 
-Grippy is navi-bootstrap's AI code reviewer — a prompt-only framework (21 markdown files, zero code) that runs on local hardware via [Agno](https://github.com/agno-agi/agno).
+Grippy is navi-bootstrap's AI code reviewer — a prompt-only framework (21 markdown files, zero code) that runs via [Agno](https://github.com/agno-agi/agno). Supports OpenAI models and local LLMs through any OpenAI-compatible endpoint.
 
-- **Local-first.** Runs on Devstral via LM Studio or Ollama. Your code never leaves your network.
 - **Structured output.** Every review produces Pydantic-validated JSON: findings with severity, confidence, evidence, and suggestions. 14 nested models, enum-constrained fields, no freeform text to parse.
-- **Validated.** Devstral Q4 (24b) passed structured output validation on first attempt against a real 250-line, 6-file diff with the full 7-file prompt chain. Raw output at [`docs/validation/`](docs/validation/).
+- **Dual deployment.** OpenAI (GPT-5.2) for CI on GitHub-hosted runners, or local models (Devstral, Qwen, etc.) via LM Studio/Ollama for air-gapped environments.
+- **Validated.** Tested against both GPT-5.2 and Devstral Q4 (24b) with the full 7-file prompt chain. Both produce schema-compliant structured JSON on first attempt.
+
+### OpenAI (default)
 
 ```python
 from grippy.agent import create_reviewer, format_pr_context
 
-reviewer = create_reviewer(
-    base_url="http://localhost:1234/v1",
-    prompts_dir="/path/to/grippy/prompts",
-)
+# Reads OPENAI_API_KEY from environment
+reviewer = create_reviewer(model_id="gpt-5.2")
 
 result = reviewer.run(format_pr_context(
     title="feat: add user auth",
@@ -90,7 +90,35 @@ result = reviewer.run(format_pr_context(
 ))
 ```
 
-Cloud models (Claude, GPT) are a config swap — change `base_url` and `model_id`. The architecture doesn't change.
+### Local LLM
+
+```python
+reviewer = create_reviewer(
+    model_id="devstral-small-2-24b-instruct-2512",
+    base_url="http://localhost:1234/v1",
+    api_key="lm-studio",  # LM Studio accepts any non-empty string
+)
+```
+
+### CI Configuration
+
+| Variable | Description | Default |
+|---|---|---|
+| `GRIPPY_TRANSPORT` | `"openai"` or `"local"` — explicit model routing | Inferred from `OPENAI_API_KEY` |
+| `OPENAI_API_KEY` | OpenAI API key (required for `transport=openai`) | — |
+| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints (embedding auth fallback) | — |
+| `GRIPPY_BASE_URL` | OpenAI-compatible API endpoint | `http://localhost:1234/v1` |
+| `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
+| `GRIPPY_EMBEDDING_MODEL` | Embedding model for knowledge graph | `text-embedding-qwen3-embedding-4b` |
+| `GRIPPY_DATA_DIR` | Persistent directory for graph DB + LanceDB | `./grippy-data` |
+| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = no timeout) | `300` |
+
+| Deployment | Key Variables |
+|---|---|
+| **OpenAI** (GitHub-hosted) | `GRIPPY_TRANSPORT=openai`, `OPENAI_API_KEY`, `GRIPPY_MODEL_ID=gpt-5.2` |
+| **Local** (self-hosted runner) | `GRIPPY_BASE_URL=http://<host>:1234/v1`, `GRIPPY_MODEL_ID=<model>`, `GRIPPY_EMBEDDING_MODEL=<embed-model>` |
+
+The architecture is identical in both modes — only the model transport changes. Defaults are local-first; CI sets OpenAI values explicitly.
 
 ## Architecture
 

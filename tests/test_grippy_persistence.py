@@ -133,7 +133,6 @@ def store(tmp_path: Path) -> GrippyStore:
         graph_db_path=tmp_path / "grippy-graph.db",
         lance_dir=tmp_path / "lance",
         embed_fn=_fake_embed,
-        embed_dim=EMBED_DIM,
     )
 
 
@@ -148,7 +147,6 @@ class TestGrippyStoreInit:
             graph_db_path=db_path,
             lance_dir=tmp_path / "lance",
             embed_fn=_fake_embed,
-            embed_dim=EMBED_DIM,
         )
         assert db_path.exists()
 
@@ -159,7 +157,6 @@ class TestGrippyStoreInit:
             graph_db_path=tmp_path / "grippy-graph.db",
             lance_dir=lance_dir,
             embed_fn=_fake_embed,
-            embed_dim=EMBED_DIM,
         )
         assert lance_dir.exists()
 

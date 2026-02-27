@@ -6,9 +6,12 @@ Usage (GitHub Actions):
 Environment variables:
     GITHUB_TOKEN            — GitHub API token for fetching diff and posting comments
     GITHUB_EVENT_PATH       — path to PR event JSON (set by GitHub Actions)
-    GRIPPY_BASE_URL         — LM Studio / OpenAI-compatible endpoint
-    GRIPPY_MODEL_ID         — model identifier at the endpoint
-    GRIPPY_EMBEDDING_MODEL  — embedding model name at the same endpoint
+    OPENAI_API_KEY          — OpenAI API key (or unset for local endpoints)
+    GRIPPY_BASE_URL         — API endpoint (default: http://localhost:1234/v1)
+    GRIPPY_MODEL_ID         — model identifier (default: devstral-small-2-24b-instruct-2512)
+    GRIPPY_EMBEDDING_MODEL  — embedding model (default: text-embedding-qwen3-embedding-4b)
+    GRIPPY_TRANSPORT        — "openai" or "local" (default: infer from OPENAI_API_KEY)
+    GRIPPY_API_KEY          — API key for non-OpenAI endpoints (embedding auth fallback)
     GRIPPY_DATA_DIR         — persistent directory for graph DB + LanceDB
     GRIPPY_TIMEOUT          — seconds before review is killed (0 = no timeout)
     GITHUB_REPOSITORY       — owner/repo (set by GitHub Actions, fallback)
@@ -29,8 +32,9 @@ from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.schema import GrippyReview
 
-# Marker embedded in every Grippy comment — used for upsert (C2 fix)
-COMMENT_MARKER = "<!-- grippy-review -->"
+# Marker prefix embedded in every Grippy comment — SHA-scoped for upsert
+COMMENT_MARKER_PREFIX = "<!-- grippy-review-"
+COMMENT_MARKER_SUFFIX = " -->"
 
 # Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
 MAX_DIFF_CHARS = 200_000
@@ -40,7 +44,7 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
     """Parse GitHub Actions pull_request event payload.
 
     Returns:
-        Dict with keys: pr_number, repo, title, author, head_ref, base_ref, description.
+        Dict with keys: pr_number, repo, title, author, head_ref, head_sha, base_ref, description.
 
     Raises:
         FileNotFoundError: If event_path doesn't exist.
@@ -54,6 +58,7 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
         "title": pr["title"],
         "author": pr["user"]["login"],
         "head_ref": pr["head"]["ref"],
+        "head_sha": pr["head"].get("sha", ""),
         "base_ref": pr["base"]["ref"],
         "description": pr.get("body") or "",
     }
@@ -123,10 +128,15 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
     return result
 
 
-def make_embed_fn(
-    base_url: str, model: str
-) -> Callable[[list[str]], list[list[float]]]:
-    """Create batch embedding function that calls LM Studio /v1/embeddings.
+def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[float]]]:
+    """Create batch embedding function that calls /v1/embeddings.
+
+    Auth behavior:
+        - ``OPENAI_API_KEY`` is only sent when base_url host is exactly
+          ``api.openai.com``. For proxies or other OpenAI-compatible endpoints,
+          use ``GRIPPY_API_KEY`` instead.
+        - ``GRIPPY_API_KEY`` is sent to any endpoint.
+        - If neither key is set, requests are unauthenticated (local LM Studio).
 
     Args:
         base_url: OpenAI-compatible API base URL (e.g. http://localhost:1234/v1).
@@ -138,10 +148,46 @@ def make_embed_fn(
     import requests  # type: ignore[import-untyped]
 
     def embed(texts: list[str]) -> list[list[float]]:
-        url = f"{base_url}/embeddings"
+        from urllib.parse import urlparse
+
+        normalized_base = base_url.rstrip("/")
+        url = f"{normalized_base}/embeddings"
+        headers: dict[str, str] = {}
+        # Only send OPENAI_API_KEY to OpenAI hosts; use GRIPPY_API_KEY for others
+        parsed = urlparse(normalized_base)
+        is_openai_host = parsed.hostname == "api.openai.com"
+        openai_key = os.environ.get("OPENAI_API_KEY") or ""
+        grippy_key = os.environ.get("GRIPPY_API_KEY") or ""
+        has_grippy_key = bool(grippy_key)
+        if is_openai_host and openai_key:
+            api_key = openai_key
+            auth_source = "OPENAI_API_KEY"
+        elif grippy_key:
+            api_key = grippy_key
+            auth_source = "GRIPPY_API_KEY"
+        elif not is_openai_host and openai_key:
+            # Don't leak OPENAI_API_KEY to non-OpenAI endpoints
+            print(
+                f"::warning::OPENAI_API_KEY present but embedding host is "
+                f"{parsed.hostname} (not api.openai.com). "
+                f"GRIPPY_API_KEY={'set' if has_grippy_key else 'unset'}. "
+                f"Sending unauthenticated."
+            )
+            api_key = ""
+            auth_source = "none"
+        else:
+            api_key = ""
+            auth_source = "none"
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        print(
+            f"::debug::Embedding auth: source={auth_source} "
+            f"host={parsed.hostname} is_openai={is_openai_host}"
+        )
         response = requests.post(
             url,
             json={"model": model, "input": texts},
+            headers=headers,
             timeout=30,
         )
         response.raise_for_status()
@@ -151,7 +197,12 @@ def make_embed_fn(
     return embed
 
 
-def format_review_comment(review: GrippyReview) -> str:
+def _make_comment_marker(head_sha: str) -> str:
+    """Build a SHA-scoped hidden marker for comment upsert."""
+    return f"{COMMENT_MARKER_PREFIX}{head_sha}{COMMENT_MARKER_SUFFIX}"
+
+
+def format_review_comment(review: GrippyReview, *, head_sha: str = "") -> str:
     """Format GrippyReview as a markdown PR comment."""
     lines: list[str] = []
 
@@ -226,9 +277,9 @@ def format_review_comment(review: GrippyReview) -> str:
         f"Complexity: {review.pr.complexity_tier.value}</sub>"
     )
 
-    # Hidden marker for upsert detection
+    # Hidden marker — SHA-scoped for upsert within same commit
     lines.append("")
-    lines.append(COMMENT_MARKER)
+    lines.append(_make_comment_marker(head_sha))
 
     return "\n".join(lines)
 
@@ -251,11 +302,12 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     return response.text
 
 
-def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
+def post_comment(token: str, repo: str, pr_number: int, body: str, *, head_sha: str = "") -> None:
     """Post or update a Grippy review comment on a PR.
 
-    Searches for an existing comment containing COMMENT_MARKER and edits
-    it instead of creating a duplicate (C2 fix).
+    Upsert strategy: if a comment with the same SHA marker exists (re-run
+    on the same commit), edit it. Otherwise create a new comment so each
+    push gets its own review in the timeline.
     """
     from github import Github
 
@@ -263,13 +315,13 @@ def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
 
-    # Look for existing Grippy comment to edit
-    for comment in pr.get_issue_comments():
-        if COMMENT_MARKER in comment.body:
-            comment.edit(body)
-            return
+    if head_sha:
+        marker = _make_comment_marker(head_sha)
+        for comment in pr.get_issue_comments():
+            if marker in comment.body:
+                comment.edit(body)
+                return
 
-    # No existing comment — create new
     pr.create_issue_comment(body)
 
 
@@ -309,6 +361,7 @@ def main() -> None:
     event_path_str = os.environ.get("GITHUB_EVENT_PATH", "")
     base_url = os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1")
     model_id = os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512")
+    transport = os.environ.get("GRIPPY_TRANSPORT") or None
     mode = os.environ.get("GRIPPY_MODE", "pr_review")
     timeout_seconds = int(os.environ.get("GRIPPY_TIMEOUT", "300"))
 
@@ -348,7 +401,7 @@ def main() -> None:
             failure_body = (
                 f"## \u274c Grippy Review \u2014 DIFF FETCH ERROR\n\n"
                 f"Could not fetch PR diff: `{exc}`\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -364,15 +417,14 @@ def main() -> None:
 
     # 3. Create agent and format context
     data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
-    embedding_model = os.environ.get(
-        "GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b"
-    )
+    embedding_model = os.environ.get("GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b")
     data_dir = Path(data_dir_str)
     data_dir.mkdir(parents=True, exist_ok=True)
 
     agent = create_reviewer(
         model_id=model_id,
         base_url=base_url,
+        transport=transport,
         mode=mode,
         db_path=data_dir / "grippy-session.db",
         session_id=f"pr-{pr_event['pr_number']}",
@@ -401,7 +453,7 @@ def main() -> None:
                 f"## ❌ Grippy Review — PARSE ERROR\n\n"
                 f"Failed after {exc.attempts} attempts.\n\n"
                 f"```\n{raw_preview}\n```\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -414,11 +466,9 @@ def main() -> None:
                 f"## \u274c Grippy Review \u2014 TIMEOUT\n\n"
                 f"Review timed out after {timeout_seconds}s.\n\n"
                 f"Model: {model_id} at {base_url}\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
-            post_comment(
-                token, pr_event["repo"], pr_event["pr_number"], failure_body
-            )
+            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
@@ -429,7 +479,7 @@ def main() -> None:
                 f"## ❌ Grippy Review — ERROR\n\n"
                 f"Review agent failed: `{exc}`\n\n"
                 f"Model: {model_id} at {base_url}\n\n"
-                f"{COMMENT_MARKER}"
+                f"<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
@@ -448,7 +498,6 @@ def main() -> None:
             graph_db_path=data_dir / "grippy-graph.db",
             lance_dir=data_dir / "lance",
             embed_fn=embed_fn,
-            embed_dim=0,
         )
         store.store_review(graph)
         print(f"  Graph: {len(graph.nodes)} nodes persisted")
@@ -456,9 +505,10 @@ def main() -> None:
         print(f"::warning::Graph persistence failed: {exc}")
 
     # 6. Format and post comment
-    comment = format_review_comment(review)
+    head_sha = pr_event.get("head_sha", "")
+    comment = format_review_comment(review, head_sha=head_sha)
     print("Posting review comment...")
-    post_comment(token, pr_event["repo"], pr_event["pr_number"], comment)
+    post_comment(token, pr_event["repo"], pr_event["pr_number"], comment, head_sha=head_sha)
     print("  Done.")
 
     # 7. Set outputs for GitHub Actions

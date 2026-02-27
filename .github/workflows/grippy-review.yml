@@ -3,6 +3,7 @@ name: Grippy Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -11,7 +12,7 @@ permissions:
 jobs:
   review:
     name: Grippy Code Review
-    runs-on: [self-hosted, linux, x64, gpu]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -22,6 +23,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Cache Grippy data
+        uses: actions/cache@v4
+        with:
+          path: ./grippy-data
+          key: grippy-data-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
+          restore-keys: |
+            grippy-data-${{ github.event.pull_request.number || 'manual' }}-
+
       - name: Install navi-bootstrap with grippy extras
         run: pip install ".[grippy,grippy-persistence]"
 
@@ -30,12 +39,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
-          GRIPPY_BASE_URL: ${{ secrets.GRIPPY_BASE_URL }}
-          GRIPPY_MODEL_ID: ${{ secrets.GRIPPY_MODEL_ID }}
-          GRIPPY_EMBEDDING_MODEL: ${{ secrets.GRIPPY_EMBEDDING_MODEL }}
-          GRIPPY_DATA_DIR: /opt/grippy-data
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRIPPY_TRANSPORT: openai
+          GRIPPY_BASE_URL: https://api.openai.com/v1
+          GRIPPY_MODEL_ID: gpt-5.2
+          GRIPPY_EMBEDDING_MODEL: text-embedding-3-large
+          GRIPPY_DATA_DIR: ./grippy-data
           GRIPPY_TIMEOUT: '300'
-        run: python -m grippy.review
+        run: python -m grippy
 
       - name: Review summary
         if: always()

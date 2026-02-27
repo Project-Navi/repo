@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from grippy.review import (
-    COMMENT_MARKER,
+    COMMENT_MARKER_PREFIX,
     MAX_DIFF_CHARS,
     _with_timeout,
     fetch_pr_diff,
@@ -395,55 +395,66 @@ class TestFetchPrDiffForkHandling:
         assert "55" in call_url
 
 
-# --- C2: post_comment upserts instead of creating duplicates ---
+# --- post_comment: SHA-scoped upsert ---
 
 
 class TestPostComment:
     @patch("github.Github")
-    def test_creates_new_comment_when_none_exists(self, mock_gh_cls: MagicMock) -> None:
-        """First review creates a new comment."""
+    def test_creates_new_comment_for_new_sha(self, mock_gh_cls: MagicMock) -> None:
+        """New SHA creates a new comment."""
         mock_pr = MagicMock()
         mock_pr.get_issue_comments.return_value = []
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
-        post_comment("token", "org/repo", 42, f"Review body\n{COMMENT_MARKER}")
+        post_comment("token", "org/repo", 42, "Review body", head_sha="abc123")
 
         mock_pr.create_issue_comment.assert_called_once()
-        mock_pr.get_issue_comments.assert_called_once()
 
     @patch("github.Github")
-    def test_edits_existing_comment_on_rerun(self, mock_gh_cls: MagicMock) -> None:
-        """Re-run edits existing Grippy comment instead of creating duplicate."""
+    def test_edits_existing_comment_for_same_sha(self, mock_gh_cls: MagicMock) -> None:
+        """Re-run on same SHA edits the existing comment."""
         existing_comment = MagicMock()
-        existing_comment.body = f"Old review\n{COMMENT_MARKER}"
+        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
         mock_pr = MagicMock()
         mock_pr.get_issue_comments.return_value = [existing_comment]
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
-        post_comment("token", "org/repo", 42, f"New review\n{COMMENT_MARKER}")
+        post_comment("token", "org/repo", 42, "New review", head_sha="abc123")
 
-        existing_comment.edit.assert_called_once()
+        existing_comment.edit.assert_called_once_with("New review")
         mock_pr.create_issue_comment.assert_not_called()
 
     @patch("github.Github")
-    def test_ignores_non_grippy_comments(self, mock_gh_cls: MagicMock) -> None:
-        """Other comments on the PR are not touched."""
-        other_comment = MagicMock()
-        other_comment.body = "Looks good to me!"
+    def test_new_comment_for_different_sha(self, mock_gh_cls: MagicMock) -> None:
+        """Different SHA creates new comment even if old review exists."""
+        existing_comment = MagicMock()
+        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
         mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = [other_comment]
+        mock_pr.get_issue_comments.return_value = [existing_comment]
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
         mock_gh_cls.return_value.get_repo.return_value = mock_repo
 
-        post_comment("token", "org/repo", 42, f"Review\n{COMMENT_MARKER}")
+        post_comment("token", "org/repo", 42, "New review", head_sha="def456")
 
         mock_pr.create_issue_comment.assert_called_once()
-        other_comment.edit.assert_not_called()
+        existing_comment.edit.assert_not_called()
+
+    @patch("github.Github")
+    def test_no_sha_always_creates_new(self, mock_gh_cls: MagicMock) -> None:
+        """Without head_sha, always creates a new comment (error comments)."""
+        mock_pr = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.get_pull.return_value = mock_pr
+        mock_gh_cls.return_value.get_repo.return_value = mock_repo
+
+        post_comment("token", "org/repo", 42, "Error comment")
+
+        mock_pr.create_issue_comment.assert_called_once()
 
 
 # --- T2: make_embed_fn ---
@@ -505,6 +516,126 @@ class TestMakeEmbedFn:
         fn = make_embed_fn("http://localhost:1234/v1", "test-model")
         with pytest.raises(Exception, match="503"):
             fn(["hello"])
+
+    @patch("requests.post")
+    def test_openai_key_sent_to_openai_host(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OPENAI_API_KEY is sent when endpoint is api.openai.com."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer sk-openai-test"
+
+    @patch("requests.post")
+    def test_openai_key_not_sent_to_non_openai_host(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OPENAI_API_KEY is NOT sent to non-OpenAI endpoints."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert "Authorization" not in headers
+
+    @patch("requests.post")
+    def test_grippy_api_key_sent_to_any_host(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GRIPPY_API_KEY is used for any endpoint."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-secret")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.2]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer grippy-secret"
+
+    @patch("requests.post")
+    def test_no_auth_when_no_keys(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No Authorization header when neither key is set."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.3]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert "Authorization" not in headers
+
+    @patch("requests.post")
+    def test_openai_key_precedence_on_openai_host(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OPENAI_API_KEY takes precedence over GRIPPY_API_KEY on OpenAI host."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.4]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer sk-openai"
+
+    @patch("requests.post")
+    def test_non_openai_host_with_both_keys_uses_grippy(
+        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-OpenAI host with both keys uses GRIPPY_API_KEY, not OPENAI_API_KEY."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"data": [{"embedding": [0.5]}]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        from grippy.review import make_embed_fn
+
+        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
+        fn(["hello"])
+
+        headers = mock_post.call_args[1].get("headers", {})
+        assert headers.get("Authorization") == "Bearer grippy-key"
 
 
 # --- T1: main() uses run_review + review_to_graph + GrippyStore ---
@@ -991,3 +1122,81 @@ class TestMainOrchestration:
         posted_body = mock_post.call_args[0][3]
         assert "Grippy Review" in posted_body
         assert "FAIL" in posted_body
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_local_first_defaults_when_env_unset(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When GRIPPY_* env vars are unset, main() uses local-first defaults."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+        # Ensure GRIPPY_* are unset to test defaults
+        monkeypatch.delenv("GRIPPY_BASE_URL", raising=False)
+        monkeypatch.delenv("GRIPPY_MODEL_ID", raising=False)
+        monkeypatch.delenv("GRIPPY_EMBEDDING_MODEL", raising=False)
+        monkeypatch.delenv("GRIPPY_TRANSPORT", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        import grippy.review as review_mod
+
+        # Point __file__ at tmp_path so .dev.vars resolution finds nothing
+        monkeypatch.setattr(review_mod, "__file__", str(tmp_path / "fake" / "grippy" / "review.py"))
+
+        review_mod.main()
+
+        # Verify local-first defaults were passed to create_reviewer
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["base_url"] == "http://localhost:1234/v1"
+        assert call_kwargs["model_id"] == "devstral-small-2-24b-instruct-2512"
+        assert call_kwargs["transport"] is None
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_transport_passed_to_create_reviewer(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """GRIPPY_TRANSPORT env var is passed through to create_reviewer()."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "openai")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        from grippy.review import main
+
+        main()
+
+        call_kwargs = mock_create.call_args[1]
+        assert call_kwargs["transport"] == "openai"

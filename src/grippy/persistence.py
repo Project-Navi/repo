@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import lancedb
+import lancedb  # type: ignore[import-untyped]
 
 from grippy.graph import EdgeType, NodeType, ReviewGraph
 
@@ -72,12 +72,10 @@ class GrippyStore:
         graph_db_path: Path | str,
         lance_dir: Path | str,
         embed_fn: EmbedFn,
-        embed_dim: int,
     ) -> None:
         self._graph_db_path = Path(graph_db_path)
         self._lance_dir = Path(lance_dir)
         self._embed_fn = embed_fn
-        self._embed_dim = embed_dim
 
         # Init SQLite
         self._graph_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,8 +145,8 @@ class GrippyStore:
 
     def _store_nodes(self, graph: ReviewGraph) -> None:
         """Embed and store nodes in LanceDB for vector search."""
-        records = []
-        texts = []
+        records: list[dict[str, Any]] = []
+        texts: list[str] = []
         for node in graph.nodes:
             text = f"{node.type.value}: {node.label}"
             if node.properties:
