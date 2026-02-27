@@ -87,6 +87,9 @@ def create_reviewer(
     session_id: str | None = None,
     num_history_runs: int = 3,
     additional_context: str | None = None,
+    # Phase 3: codebase search
+    tools: list[Any] | None = None,
+    tool_call_limit: int | None = None,
 ) -> Agent:
     """Create a Grippy review agent.
 
@@ -105,6 +108,8 @@ def create_reviewer(
         session_id: Session ID for review continuity across runs.
         num_history_runs: Number of prior runs to include in context (requires db).
         additional_context: Extra context appended to the system message.
+        tools: Optional list of Agno Toolkit instances for agent tool use.
+        tool_call_limit: Max tool calls per run. None = unlimited.
 
     Returns:
         Configured Agno Agent with Grippy's prompt chain and structured output schema.
@@ -123,6 +128,10 @@ def create_reviewer(
         kwargs["session_id"] = session_id
     if additional_context is not None:
         kwargs["additional_context"] = additional_context
+    if tools is not None:
+        kwargs["tools"] = tools
+    if tool_call_limit is not None:
+        kwargs["tool_call_limit"] = tool_call_limit
 
     # Resolve transport via three-tier priority
     resolved_transport, source = _resolve_transport(transport, model_id)

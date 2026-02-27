@@ -220,6 +220,38 @@ def main() -> None:
     data_dir = Path(data_dir_str)
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    # 2a. Build codebase index for tool-augmented review (non-fatal)
+    codebase_tools: list[Any] = []
+    workspace = os.environ.get("GITHUB_WORKSPACE", "")
+    if workspace:
+        try:
+            from grippy.codebase import CodebaseIndex, CodebaseToolkit
+
+            cb_embedder = create_embedder(
+                transport=transport or "local",
+                model=embedding_model,
+                base_url=base_url,
+            )
+            lance_dir = data_dir / "lance"
+            lance_dir.mkdir(parents=True, exist_ok=True)
+            import lancedb  # type: ignore[import-untyped]
+
+            lance_db = lancedb.connect(str(lance_dir))
+            cb_index = CodebaseIndex(
+                repo_root=Path(workspace),
+                lance_db=lance_db,
+                embedder=cb_embedder,
+            )
+            if not cb_index.is_indexed:
+                print("Indexing codebase...")
+                chunk_count = cb_index.build()
+                print(f"  Indexed {chunk_count} chunks")
+            else:
+                print("Codebase index found (cached)")
+            codebase_tools = [CodebaseToolkit(index=cb_index, repo_root=Path(workspace))]
+        except Exception as exc:
+            print(f"::warning::Codebase indexing failed (non-fatal): {exc}")
+
     try:
         agent = create_reviewer(
             model_id=model_id,
@@ -228,6 +260,8 @@ def main() -> None:
             mode=mode,
             db_path=data_dir / "grippy-session.db",
             session_id=f"pr-{pr_event['pr_number']}",
+            tools=codebase_tools or None,
+            tool_call_limit=10 if codebase_tools else None,
         )
     except ValueError as exc:
         error_body = (

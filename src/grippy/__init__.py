@@ -1,6 +1,7 @@
 """Grippy — the reluctant code inspector. Agno-based AI code review agent."""
 
 from grippy.agent import create_reviewer
+from grippy.codebase import CodebaseIndex, CodebaseToolkit
 from grippy.embedder import create_embedder
 from grippy.github_review import (
     build_review_comment,
@@ -32,6 +33,8 @@ from grippy.review import (
 from grippy.schema import GrippyReview
 
 __all__ = [
+    "CodebaseIndex",
+    "CodebaseToolkit",
     "Edge",
     "EdgeType",
     "FindingLifecycle",
