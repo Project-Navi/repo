@@ -8,54 +8,84 @@ You are **alpha** on the navi-bootstrap project (`/home/ndspence/GitHub/navi-boo
 
 ## Read these first (in order)
 
-1. **Comms thread** — `.comms/thread.md` — read from alpha's "Session 14" entry onward (~line 640).
+1. **Comms thread** — `.comms/thread.md` — read from alpha's "Session 15" entry (~line 677).
 
 2. **Memory file** — `/home/ndspence/.claude/projects/-home-ndspence-GitHub-navi-bootstrap/memory/MEMORY.md` — index + current state.
 
-3. **Git log** — `git log --oneline -15` — check recent commits on `feat/grippy-pr-ux` and `main`.
+3. **Git log** — `git log --oneline -10` — check recent commits on `feat/grippy-codebase-search` and `main`.
 
-4. **PR #12 status** — `gh pr view 12` — check if merged or if Grippy re-review posted.
+4. **PR #13 status** — `gh pr view 13` — check if merged or needs action.
 
-## What exists (built across 14 sessions by alpha + bravo)
+## What exists (built across 15 sessions by alpha + bravo)
 
 - **Engine:** 10 modules, 5 CLI commands, 7 packs — mature and audited
-- **Grippy Phase 2 (PR UX) IMPLEMENTED + FIXED:**
-  - `src/grippy/schema.py` — GrippyReview (14 nested Pydantic models), Finding frozen, fingerprint normalized
-  - `src/grippy/agent.py` — `create_reviewer()` with transport selection
-  - `src/grippy/graph.py` — Node, Edge, ReviewGraph, FindingStatus enum, `cross_reference_findings()`
-  - `src/grippy/retry.py` — `run_review()` with validation retry
-  - `src/grippy/persistence.py` — GrippyStore (SQLite + LanceDB), BatchEmbedder protocol, migration safety
-  - `src/grippy/review.py` — CI entry point: post_review with try/except, model override, transport error UX
-  - `src/grippy/embedder.py` — `create_embedder()` + OpenAIEmbedder standalone
-  - `src/grippy/github_review.py` — Two-layer comments (inline + summary), 422 fallback, GraphQL variable substitution, fork detection
-- **CI:** `.github/workflows/grippy-review.yml` — OpenAI on GitHub-hosted ubuntu-latest
+- **Grippy Phase 2 (PR UX) MERGED:** PR #12 squash-merged to main
+- **Grippy Phase 3 (Codebase Search) IMPLEMENTED:** PR #13 open
+  - `src/grippy/codebase.py` — CodebaseIndex, CodebaseToolkit, 4 tools (search_code, grep_code, read_file, list_files)
+  - Wired into `agent.py` (tools + tool_call_limit params) and `review.py` (non-fatal, GITHUB_WORKSPACE-gated)
+  - `system-core.md` updated with tool instructions + confidence calibration
+  - 60 new tests (632 total), ruff/mypy clean
+  - Grippy reviewed: round 1 52/100 → round 2 75/100 PASS after 5 fixes
+- **Grippy prompt files:** 21 in `prompts_data/`, only 6 wired. **12 unwired.**
+- **CI:** tests, lint, Grippy review, CodeQL, scorecard
 - **Branch protection LIVE:** main requires PRs + Grippy Code Review check
-- **572 tests passing**, 1 skipped, ruff/mypy clean
 
 ## Current state
 
-- **Branch:** `feat/grippy-pr-ux` — 7 fix commits pushed, awaiting Grippy re-review on PR #12.
-- **PR #12:** https://github.com/Project-Navi/repo/pull/12 — +1523/-583 lines, 14 files + 7 fix commits.
-- **PRs #6-#11:** ALL MERGED to main.
-- **HEAD:** `d451223` (test: full suite verification + lint cleanup)
+- **Branch:** `feat/grippy-codebase-search` — 2 commits, PR #13 open
+- **PR #13:** https://github.com/Project-Navi/repo/pull/13 — Grippy passed 75/100
+- **HEAD:** `9b6ab2b` (fix: address Grippy review findings on codebase search)
+- **main HEAD:** `1f4e9e2` (feat: Grippy PR UX redesign — PR #12 squash merge)
 
-## Your task list on reboot
+## YOUR #1 TASK: Wire the remaining 12 prompts
 
-1. **Check Grippy's re-review** on PR #12 — should score higher after the 10 fixes
-2. **If clean → merge PR #12** to main
-3. **Wire Actions cache for Grippy state** (if Nelson approves) — `actions/cache` keyed on `pr-{number}` for cross-round persistence
-4. **Grippy meta-analysis** — compare review quality before/after UX redesign
-5. **Plan next phase with Nelson** — multi-pack orchestration, PyPI publish, vector similarity v1.1
+Nelson's direct order from session 15. Grippy is "half-brain dead" — only 6 of 21 prompts are active.
 
-## Key decisions (sessions 13-14)
+**Currently wired (pr_review mode):**
+- `CONSTITUTION.md` — identity (description)
+- `PERSONA.md` — identity (description)
+- `system-core.md` — instructions
+- `pr-review.md` — instructions
+- `scoring-rubric.md` — instructions
+- `output-schema.md` — instructions
 
-- **Finding fingerprint normalized:** strip + lowercase + `.value` — stable across whitespace/case
-- **Finding model frozen:** prevents accidental mutation after construction
-- **GraphQL injection fixed:** `resolve_threads` uses parameterized `$threadId` variable
-- **Migration safety:** only "already exists"/"duplicate column" errors are silently ignored
-- **BatchEmbedder protocol:** batch when available, single-call fallback
-- **post_review resilience:** catches failures, posts error comment, exit based on verdict not posting success
-- **State persistence:** GitHub Actions cache preferred over git repo for SQLite/LanceDB (no concurrency issues, no binary bloat)
+**Unwired — need to integrate:**
+
+| File | Purpose | Likely integration point |
+|------|---------|------------------------|
+| `tone-calibration.md` | Score → tone register mapping | Instructions chain |
+| `confidence-filter.md` | Suppress low-confidence findings | Instructions chain |
+| `escalation.md` | When/how to escalate | Instructions chain |
+| `context-builder.md` | How to use file context + learnings | Instructions chain |
+| `catchphrases.md` | Score-gated one-liners | Instructions chain |
+| `disguises.md` | Seasonal persona variations | Identity or instructions |
+| `ascii-art.md` | Score-gated ASCII art | Instructions chain |
+| `all-clear.md` | Zero-findings celebration | Instructions chain |
+| `cli-mode.md` | Local CLI review format | Mode-gated (new mode) |
+| `github-app.md` | GitHub App integration | Mode-gated (new mode) |
+| `sdk-easter-egg.md` | Hidden SDK runtime behavior | Conditional |
+| `README.md` | Index/docs | Probably stays unwired |
+
+**Approach:**
+1. Read each unwired prompt file to understand its content and activation conditions
+2. Determine where it fits: MODE_CHAINS in `prompts.py`, conditional in `agent.py`, or runtime in `review.py`
+3. Wire them, add tests, verify existing tests still pass
+4. Some may need to be conditional (e.g., disguises only on certain dates, cli-mode only when mode="cli")
+
+## Task list (after prompt wiring)
+
+1. Merge PR #13 (if CI passes)
+2. Wire Actions cache for Grippy state persistence
+3. Grippy meta-analysis — compare review quality with full prompt chain
+4. Plan next phase with Nelson
+
+## Key decisions (sessions 13-15)
+
+- **Agno Toolkit pattern:** `Function.from_callable()` + `self.functions` dict (Serena pattern)
+- **LanceDB compat:** `list_tables().tables` attribute for >= 0.20
+- **Non-fatal codebase indexing:** log warning, proceed diff-only
+- **Tool call limit:** 10 per review (~30K tokens max tool output)
+- **State persistence:** GitHub Actions cache preferred (no binary bloat)
 - **Vector similarity deferred to v1.1** — fingerprint matching only for v1
 - **Dispatches must name exactly one owner** (learned from C1 duplicate work)
 

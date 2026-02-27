@@ -674,3 +674,81 @@ Nelson asked about creating an org-level `grippy-state` repo for SQLite+LanceDB.
 4. Grippy meta-analysis: compare review quality before/after fixes
 5. Plan next phase with Nelson
 
+---
+[2026-02-27] **alpha**: **Session 15 — Codebase search tools shipped, Grippy reviewed himself, prompt wiring is next.**
+
+### What happened
+
+1. **PR #12 merged** — Grippy passed (70/100), squash-merged to main. Truncation fix committed first.
+2. **PR #13 opened** — `feat/grippy-codebase-search` — codebase search tools for Grippy.
+3. **Grippy reviewed PR #13** — Round 1: 52/100 FAIL (7 findings, 5 actionable). Fixed all 5, pushed. Round 2: 75/100 PASS (4 new findings, lower severity).
+
+### PR #13: Codebase Search Tools
+
+**New module:** `src/grippy/codebase.py` (~400 lines after fixes)
+
+| Component | What |
+|-----------|------|
+| `walk_source_files()` | git ls-files + manual walk fallback |
+| `chunk_file()` | Whole-file or overlapping character windows, relative paths |
+| `CodebaseIndex` | Build/search over LanceDB `codebase_chunks` table |
+| `CodebaseToolkit(Toolkit)` | 4 Agno tools: `search_code`, `grep_code`, `read_file`, `list_files` |
+| `_limit_result()` | Caps tool output at 12K chars with narrowing guidance |
+
+**Wiring:**
+- `agent.py` — `create_reviewer(tools=..., tool_call_limit=...)` params added
+- `review.py` — Non-fatal indexing in `main()`, gated on `GITHUB_WORKSPACE`
+- `system-core.md` — Codebase Tools section + updated Confidence Calibration
+- On by default in CI, 10 tool call limit, `_MAX_INDEX_FILES=5000` safety cap
+
+**Grippy fix commits (round 1 findings):**
+- Clamp overlap to prevent infinite loop when overlap >= chunk_size
+- Store relative paths (search_code → read_file interop)
+- `--max-count=50` on grep to cap broad patterns
+- `_MAX_INDEX_FILES=5000` limit for large repos
+- Fixed broken timeout test
+
+**Tests:** 60 new (632 total), ruff/mypy clean.
+
+### Key technical decisions
+
+- **Agno Toolkit pattern** follows Serena's approach: `Function.from_callable()` to extract param schema from docstrings, registered into `self.functions` dict
+- **LanceDB `mode="overwrite"`** instead of drop+create (avoids race condition)
+- **`list_tables().tables`** attribute access for LanceDB >= 0.20 compat (returns `ListTablesResponse`, not `list`)
+- **Non-fatal everything** — indexing failure → warning + diff-only fallback
+
+### Grippy meta-observations (PR #13)
+
+- **5/7 actionable findings on round 1** — best hit rate yet
+- Score recovery: 52 → 75 after fixes (vs PR #12: 58 → 70)
+- Found real bugs: infinite loop, broken test, absolute path interop issue
+- Still no finding lifecycle across rounds (round 2 didn't acknowledge round 1 fixes)
+- Category scores still inconsistent, duration still 0ms
+
+### Next session task: WIRE THE REMAINING PROMPTS
+
+Nelson's direct order. Only 6 of 21 prompt files are wired into `pr_review` mode. The other 12 sit on the shelf:
+
+**Unwired prompts to integrate:**
+- `tone-calibration.md` — score → tone register mapping
+- `confidence-filter.md` — suppress low-confidence findings
+- `escalation.md` — when/how to escalate to humans
+- `context-builder.md` — how to use file context + learnings
+- `catchphrases.md` — score-gated one-liners
+- `disguises.md` — seasonal persona variations
+- `ascii-art.md` — score-gated ASCII art
+- `all-clear.md` — zero-findings celebration
+- `cli-mode.md` — local CLI review format
+- `github-app.md` — GitHub App integration format
+- `sdk-easter-egg.md` — hidden SDK runtime behavior
+- `README.md` — index/docs (probably stays unwired)
+
+This is the #1 priority. Read each prompt file, understand its activation condition, and wire it into the appropriate slot in `prompts.py` MODE_CHAINS or as conditional additions in `agent.py`/`review.py`.
+
+### PR #13 status
+- Branch: `feat/grippy-codebase-search`
+- HEAD: `9b6ab2b`
+- Grippy re-review: 75/100 PASS, 4 findings (all MEDIUM or below)
+- Tests: pending in CI
+- **Not yet merged** — waiting for CI to pass
+
