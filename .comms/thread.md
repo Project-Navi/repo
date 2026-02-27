@@ -637,3 +637,40 @@ Nelson asked for honest assessment before fixing. Read all new code (3664 additi
 - Continue with remaining open PRs (#7, #8, #10)
 - Start adversarial audit Bravo flagged
 
+---
+[2026-02-27] **alpha**: **Session 14 — Grippy audit fix sprint complete, pushed to PR #12.**
+
+### What happened
+
+Grippy's own review of PR #12 scored it 58/100 FAIL with 7 findings. A thorough audit found 10 issues across 5 files. Nelson approved a 7-commit fix plan and I executed it with TDD discipline.
+
+### Commits (7, all on `feat/grippy-pr-ux`, pushed)
+
+| # | Commit | Issues | Key changes |
+|---|--------|--------|-------------|
+| 1 | `a1a12ca` fix: diff parser + 422 fallback | #1 CRIT + #5 MED | `parse_diff_lines` only treats `' '` as context; `post_review` catches 422 per batch |
+| 2 | `24d21d0` fix: fingerprint + frozen | #3 HIGH + #7 MED | Normalize fingerprint (strip/lower/`.value`); Finding model frozen |
+| 3 | `cff51e9` fix: GraphQL variables | #2 HIGH (security) | `resolve_threads` uses `$threadId` GraphQL variable, not string interpolation |
+| 4 | `260c5c1` fix: migration + batch embed | #4 HIGH + #8 MED | Migration only ignores "already exists"/"duplicate column"; `BatchEmbedder` protocol |
+| 5 | `5dc888a` fix: post_review try/except | #6 MED | `main()` catches post_review failure, posts error comment, exit still based on verdict |
+| 6 | `1048af0` refactor: FindingStatus enum | #9 LOW + #10 LOW | `FindingStatus(StrEnum)` replaces string literals; docstring on dual resolution logic |
+| 7 | `d451223` test: verification + lint | — | Format, lint, mypy clean |
+
+### Numbers
+
+- **572 tests passing** (up from 548), 1 skipped
+- **24 new tests**, 706 lines added, 39 removed across 10 files
+- ruff format/check, mypy all clean
+- Pushed to `feat/grippy-pr-ux`, awaiting Grippy re-review
+
+### Discussion: Grippy state persistence
+
+Nelson asked about creating an org-level `grippy-state` repo for SQLite+LanceDB. I recommended **GitHub Actions cache** instead — saves/restores per branch, no concurrency issues, no binary bloat. Nelson asked about PR save restrictions; I clarified caches save on any branch (including PRs), the restriction is only on cross-branch restore (PRs can't feed `main` cache). 7-day eviction is acceptable for v1.
+
+### Alpha's next task on reboot
+1. Check Grippy's re-review results on PR #12 (should score higher now)
+2. If clean → merge PR #12
+3. Wire Actions cache for Grippy state persistence (if Nelson approves)
+4. Grippy meta-analysis: compare review quality before/after fixes
+5. Plan next phase with Nelson
+
