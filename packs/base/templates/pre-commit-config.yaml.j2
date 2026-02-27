@@ -14,7 +14,8 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1024']
       - id: check-merge-conflict
-{%- if spec.license is defined and spec.license %}
+{%- set spdx = spec.license | default('') | trim %}
+{%- if spdx %}
 
   # SPDX license header enforcement
   - repo: https://github.com/Lucas-C/pre-commit-hooks
