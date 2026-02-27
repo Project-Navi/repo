@@ -12,17 +12,29 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import lancedb  # type: ignore[import-untyped]
 
-from grippy.graph import EdgeType, NodeType, ReviewGraph
+from grippy.graph import EdgeType, FindingStatus, NodeType, ReviewGraph
 
 # --- Types ---
 
-EmbedFn = Callable[[list[str]], list[list[float]]]
+
+@runtime_checkable
+class Embedder(Protocol):
+    """Protocol for embedders — compatible with Agno's OpenAIEmbedder."""
+
+    def get_embedding(self, text: str) -> list[float]: ...
+
+
+@runtime_checkable
+class BatchEmbedder(Protocol):
+    """Protocol for embedders that support batch embedding."""
+
+    def get_embedding(self, text: str) -> list[float]: ...
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]: ...
 
 
 def _arrow_table_to_dicts(table: Any) -> list[dict[str, Any]]:
@@ -58,9 +70,15 @@ CREATE TABLE IF NOT EXISTS node_meta (
     label TEXT NOT NULL,
     properties TEXT NOT NULL DEFAULT '{}',
     review_id TEXT,
+    session_id TEXT,
     created_at TEXT NOT NULL
 )
 """
+
+_MIGRATIONS = [
+    # v1.1: add session_id for PR-scoped finding lifecycle
+    "ALTER TABLE node_meta ADD COLUMN session_id TEXT",
+]
 
 
 class GrippyStore:
@@ -71,11 +89,11 @@ class GrippyStore:
         *,
         graph_db_path: Path | str,
         lance_dir: Path | str,
-        embed_fn: EmbedFn,
+        embedder: Embedder,
     ) -> None:
         self._graph_db_path = Path(graph_db_path)
         self._lance_dir = Path(lance_dir)
-        self._embed_fn = embed_fn
+        self._embedder = embedder
 
         # Init SQLite
         self._graph_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +112,15 @@ class GrippyStore:
         for idx_sql in _EDGE_INDEXES_SQL:
             cur.execute(idx_sql)
         cur.execute(_NODE_META_TABLE_SQL)
+        for migration in _MIGRATIONS:
+            try:
+                cur.execute(migration)
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if "already exists" in msg or "duplicate column" in msg:
+                    pass  # Column already present — skip
+                else:
+                    raise  # Real error — propagate
         self._conn.commit()
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
@@ -107,25 +134,26 @@ class GrippyStore:
 
     # --- Store ---
 
-    def store_review(self, graph: ReviewGraph) -> None:
+    def store_review(self, graph: ReviewGraph, *, session_id: str = "") -> None:
         """Persist a ReviewGraph — edges to SQLite, nodes to LanceDB."""
-        self._store_edges(graph)
+        self._store_edges(graph, session_id=session_id)
         self._store_nodes(graph)
 
-    def _store_edges(self, graph: ReviewGraph) -> None:
+    def _store_edges(self, graph: ReviewGraph, *, session_id: str = "") -> None:
         cur = self._conn.cursor()
         for node in graph.nodes:
             # Store node metadata
             cur.execute(
                 "INSERT OR IGNORE INTO node_meta "
-                "(node_id, node_type, label, properties, review_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "(node_id, node_type, label, properties, review_id, session_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     node.id,
                     node.type.value,
                     node.label,
                     json.dumps(node.properties),
                     node.source_review_id,
+                    session_id,
                     node.created_at,
                 ),
             )
@@ -166,7 +194,10 @@ class GrippyStore:
         if not records:
             return
 
-        vectors = self._embed_fn(texts)
+        if isinstance(self._embedder, BatchEmbedder):
+            vectors = self._embedder.get_embedding_batch(texts)
+        else:
+            vectors = [self._embedder.get_embedding(t) for t in texts]
         for rec, vec in zip(records, vectors, strict=True):
             rec["vector"] = vec
 
@@ -316,6 +347,42 @@ class GrippyStore:
         table = self._ensure_nodes_table()
         if table is None:
             return []
-        query_vec = self._embed_fn([query])[0]
+        query_vec = self._embedder.get_embedding(query)
         arrow_result = table.search(query_vec).limit(k).to_arrow()
         return _arrow_table_to_dicts(arrow_result)
+
+    # --- Resolution queries ---
+
+    def get_prior_findings(self, *, session_id: str) -> list[dict[str, Any]]:
+        """Get open findings for a PR session.
+
+        Call BEFORE store_review() so only prior round findings are returned.
+        """
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT node_id, label, properties FROM node_meta "
+            "WHERE node_type = ? AND session_id = ?",
+            (NodeType.FINDING.value, session_id),
+        )
+        results = []
+        for row in cur.fetchall():
+            props = json.loads(row["properties"])
+            if props.get("status") == "open":
+                props["node_id"] = row["node_id"]
+                props["title"] = row["label"]
+                results.append(props)
+        return results
+
+    def update_finding_status(self, node_id: str, status: str | FindingStatus) -> None:
+        """Update a finding's status in node_meta properties."""
+        cur = self._conn.cursor()
+        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (node_id,))
+        row = cur.fetchone()
+        if row:
+            props = json.loads(row["properties"])
+            props["status"] = status
+            cur.execute(
+                "UPDATE node_meta SET properties = ? WHERE node_id = ?",
+                (json.dumps(props), node_id),
+            )
+            self._conn.commit()

@@ -27,14 +27,12 @@ from pathlib import Path
 from typing import Any
 
 from grippy.agent import create_reviewer, format_pr_context
-from grippy.graph import review_to_graph
+from grippy.embedder import create_embedder
+from grippy.github_review import post_review
+from grippy.graph import FindingStatus, review_to_graph
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.schema import GrippyReview
-
-# Marker prefix embedded in every Grippy comment — SHA-scoped for upsert
-COMMENT_MARKER_PREFIX = "<!-- grippy-review-"
-COMMENT_MARKER_SUFFIX = " -->"
 
 # Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
 MAX_DIFF_CHARS = 200_000
@@ -128,162 +126,6 @@ def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
     return result
 
 
-def make_embed_fn(base_url: str, model: str) -> Callable[[list[str]], list[list[float]]]:
-    """Create batch embedding function that calls /v1/embeddings.
-
-    Auth behavior:
-        - ``OPENAI_API_KEY`` is only sent when base_url host is exactly
-          ``api.openai.com``. For proxies or other OpenAI-compatible endpoints,
-          use ``GRIPPY_API_KEY`` instead.
-        - ``GRIPPY_API_KEY`` is sent to any endpoint.
-        - If neither key is set, requests are unauthenticated (local LM Studio).
-
-    Args:
-        base_url: OpenAI-compatible API base URL (e.g. http://localhost:1234/v1).
-        model: Embedding model name (e.g. text-embedding-qwen3-embedding-4b).
-
-    Returns:
-        Callable that takes list[str] and returns list[list[float]].
-    """
-    import requests  # type: ignore[import-untyped]
-
-    def embed(texts: list[str]) -> list[list[float]]:
-        from urllib.parse import urlparse
-
-        normalized_base = base_url.rstrip("/")
-        url = f"{normalized_base}/embeddings"
-        headers: dict[str, str] = {}
-        # Only send OPENAI_API_KEY to OpenAI hosts; use GRIPPY_API_KEY for others
-        parsed = urlparse(normalized_base)
-        is_openai_host = parsed.hostname == "api.openai.com"
-        openai_key = os.environ.get("OPENAI_API_KEY") or ""
-        grippy_key = os.environ.get("GRIPPY_API_KEY") or ""
-        has_grippy_key = bool(grippy_key)
-        if is_openai_host and openai_key:
-            api_key = openai_key
-            auth_source = "OPENAI_API_KEY"
-        elif grippy_key:
-            api_key = grippy_key
-            auth_source = "GRIPPY_API_KEY"
-        elif not is_openai_host and openai_key:
-            # Don't leak OPENAI_API_KEY to non-OpenAI endpoints
-            print(
-                f"::warning::OPENAI_API_KEY present but embedding host is "
-                f"{parsed.hostname} (not api.openai.com). "
-                f"GRIPPY_API_KEY={'set' if has_grippy_key else 'unset'}. "
-                f"Sending unauthenticated."
-            )
-            api_key = ""
-            auth_source = "none"
-        else:
-            api_key = ""
-            auth_source = "none"
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        print(
-            f"::debug::Embedding auth: source={auth_source} "
-            f"host={parsed.hostname} is_openai={is_openai_host}"
-        )
-        response = requests.post(
-            url,
-            json={"model": model, "input": texts},
-            headers=headers,
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()["data"]
-        return [item["embedding"] for item in data]
-
-    return embed
-
-
-def _make_comment_marker(head_sha: str) -> str:
-    """Build a SHA-scoped hidden marker for comment upsert."""
-    return f"{COMMENT_MARKER_PREFIX}{head_sha}{COMMENT_MARKER_SUFFIX}"
-
-
-def format_review_comment(review: GrippyReview, *, head_sha: str = "") -> str:
-    """Format GrippyReview as a markdown PR comment."""
-    lines: list[str] = []
-
-    # Header with verdict
-    status = review.verdict.status.value
-    emoji = {"PASS": "✅", "FAIL": "❌", "PROVISIONAL": "⚠️"}.get(status, "🔍")
-    lines.append(f"## {emoji} Grippy Review — {status}")
-    lines.append("")
-
-    # Personality opener
-    lines.append(f"> {review.personality.opening_catchphrase}")
-    lines.append("")
-
-    # Score
-    lines.append(f"**Score: {review.score.overall}/100**")
-    bd = review.score.breakdown
-    lines.append(
-        f"Security {bd.security} · Logic {bd.logic} · Governance {bd.governance}"
-        f" · Reliability {bd.reliability} · Observability {bd.observability}"
-    )
-    lines.append("")
-
-    # Verdict summary
-    lines.append(f"**Verdict:** {review.verdict.summary}")
-    if review.verdict.merge_blocking:
-        lines.append("**⛔ This review blocks merge.**")
-    lines.append("")
-
-    # Findings
-    if review.findings:
-        lines.append(f"### Findings ({len(review.findings)})")
-        lines.append("")
-        for finding in review.findings:
-            sev = finding.severity.value
-            sev_emoji = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵"}.get(sev, "⚪")
-            lines.append(f"#### {sev_emoji} {sev}: {finding.title}")
-            lines.append(f"📁 `{finding.file}:{finding.line_start}`")
-            lines.append(f"Confidence: {finding.confidence}%")
-            lines.append("")
-            lines.append(finding.description)
-            lines.append("")
-            lines.append(f"**Suggestion:** {finding.suggestion}")
-            if finding.governance_rule_id:
-                lines.append(f"**Rule:** {finding.governance_rule_id}")
-            lines.append("")
-            lines.append(f"*— {finding.grippy_note}*")
-            lines.append("")
-    else:
-        lines.append("### No findings")
-        lines.append("")
-
-    # Escalations
-    if review.escalations:
-        lines.append(f"### Escalations ({len(review.escalations)})")
-        lines.append("")
-        for esc in review.escalations:
-            blocking_tag = " **[BLOCKING]**" if esc.blocking else ""
-            lines.append(f"- **{esc.id}** ({esc.severity}){blocking_tag}: {esc.summary}")
-            lines.append(f"  Target: {esc.recommended_target.value}")
-        lines.append("")
-
-    # Personality closer
-    lines.append("---")
-    lines.append(f"*{review.personality.closing_line}*")
-    lines.append("")
-
-    # Meta footer
-    lines.append(
-        f"<sub>Model: {review.model} · "
-        f"Duration: {review.meta.review_duration_ms}ms · "
-        f"Files: {review.scope.files_reviewed}/{review.scope.files_in_diff} · "
-        f"Complexity: {review.pr.complexity_tier.value}</sub>"
-    )
-
-    # Hidden marker — SHA-scoped for upsert within same commit
-    lines.append("")
-    lines.append(_make_comment_marker(head_sha))
-
-    return "\n".join(lines)
-
-
 def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     """Fetch complete PR diff via GitHub API raw diff endpoint.
 
@@ -302,26 +144,13 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     return response.text
 
 
-def post_comment(token: str, repo: str, pr_number: int, body: str, *, head_sha: str = "") -> None:
-    """Post or update a Grippy review comment on a PR.
-
-    Upsert strategy: if a comment with the same SHA marker exists (re-run
-    on the same commit), edit it. Otherwise create a new comment so each
-    push gets its own review in the timeline.
-    """
+def post_comment(token: str, repo: str, pr_number: int, body: str) -> None:
+    """Post an error/status comment on a PR (used for error paths only)."""
     from github import Github
 
     gh = Github(token)
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
-
-    if head_sha:
-        marker = _make_comment_marker(head_sha)
-        for comment in pr.get_issue_comments():
-            if marker in comment.body:
-                comment.edit(body)
-                return
-
     pr.create_issue_comment(body)
 
 
@@ -385,7 +214,32 @@ def main() -> None:
         f"({pr_event['head_ref']} → {pr_event['base_ref']})"
     )
 
-    # 2. Fetch diff (M2: graceful 403 handling for fork PRs)
+    # 2. Validate transport + create agent early (before expensive diff fetch)
+    data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
+    embedding_model = os.environ.get("GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b")
+    data_dir = Path(data_dir_str)
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        agent = create_reviewer(
+            model_id=model_id,
+            base_url=base_url,
+            transport=transport,
+            mode=mode,
+            db_path=data_dir / "grippy-session.db",
+            session_id=f"pr-{pr_event['pr_number']}",
+        )
+    except ValueError as exc:
+        error_body = (
+            f"## \u274c Grippy Review \u2014 CONFIG ERROR\n\n"
+            f"Invalid configuration: `{exc}`\n\n"
+            f"Valid GRIPPY_TRANSPORT values: `openai`, `local`\n\n"
+            f"<!-- grippy-error -->"
+        )
+        post_comment(token, pr_event["repo"], pr_event["pr_number"], error_body)
+        sys.exit(1)
+
+    # 3. Fetch diff (M2: graceful 403 handling for fork PRs)
     print("Fetching PR diff...")
     try:
         diff = fetch_pr_diff(token, pr_event["repo"], pr_event["pr_number"])
@@ -411,25 +265,12 @@ def main() -> None:
     print(f"  {file_count} files, {len(diff)} chars")
 
     # H2: cap diff size to avoid overflowing LLM context
+    original_len = len(diff)
     diff = truncate_diff(diff)
-    if len(diff) < file_count:
-        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars")
+    if len(diff) < original_len:
+        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
 
-    # 3. Create agent and format context
-    data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
-    embedding_model = os.environ.get("GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b")
-    data_dir = Path(data_dir_str)
-    data_dir.mkdir(parents=True, exist_ok=True)
-
-    agent = create_reviewer(
-        model_id=model_id,
-        base_url=base_url,
-        transport=transport,
-        mode=mode,
-        db_path=data_dir / "grippy-session.db",
-        session_id=f"pr-{pr_event['pr_number']}",
-    )
-
+    # 4. Format context
     user_message = format_pr_context(
         title=pr_event["title"],
         author=pr_event["author"],
@@ -438,7 +279,7 @@ def main() -> None:
         diff=diff,
     )
 
-    # 4. Run review with retry + validation (replaces agent.run + parse_review_response)
+    # 5. Run review with retry + validation (replaces agent.run + parse_review_response)
     print(f"Running review (model={model_id}, endpoint={base_url})...")
     try:
         review = _with_timeout(
@@ -492,29 +333,75 @@ def main() -> None:
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
-    # 5. Build graph and persist (non-fatal — review still gets posted on failure)
+    # 6. Build graph, get prior findings, THEN persist (non-fatal)
+    session_id = f"pr-{pr_event['pr_number']}"
+    prior_findings: list[dict[str, Any]] = []
+    store: GrippyStore | None = None
     print("Persisting review graph...")
     try:
-        embed_fn = make_embed_fn(base_url, embedding_model)
+        embedder = create_embedder(
+            transport=transport or "local",
+            model=embedding_model,
+            base_url=base_url,
+        )
         graph = review_to_graph(review)
         store = GrippyStore(
             graph_db_path=data_dir / "grippy-graph.db",
             lance_dir=data_dir / "lance",
-            embed_fn=embed_fn,
+            embedder=embedder,
         )
-        store.store_review(graph)
+        # Query prior findings BEFORE storing current round
+        try:
+            prior_findings = store.get_prior_findings(session_id=session_id)
+        except Exception:
+            prior_findings = []
+        store.store_review(graph, session_id=session_id)
         print(f"  Graph: {len(graph.nodes)} nodes persisted")
     except Exception as exc:
         print(f"::warning::Graph persistence failed: {exc}")
 
-    # 6. Format and post comment
+    # 7. Post review with inline comments + summary dashboard
     head_sha = pr_event.get("head_sha", "")
-    comment = format_review_comment(review, head_sha=head_sha)
-    print("Posting review comment...")
-    post_comment(token, pr_event["repo"], pr_event["pr_number"], comment, head_sha=head_sha)
-    print("  Done.")
+    print("Posting review...")
+    resolution = None
+    try:
+        resolution = post_review(
+            token=token,
+            repo=pr_event["repo"],
+            pr_number=pr_event["pr_number"],
+            findings=review.findings,
+            prior_findings=prior_findings,
+            head_sha=head_sha,
+            diff=diff,
+            score=review.score.overall,
+            verdict=review.verdict.status.value,
+        )
+        print("  Done.")
+    except Exception as exc:
+        print(f"::warning::Failed to post review: {exc}")
+        try:
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                f"## Grippy Review\n\n**Review completed** (score: "
+                f"{review.score.overall}/100, {review.verdict.status.value}) "
+                f"but **failed to post inline comments**: {exc}\n\n"
+                f"<!-- grippy-error -->",
+            )
+        except Exception:
+            pass  # Don't mask the original error
 
-    # 7. Set outputs for GitHub Actions
+    # 8. Update resolved finding status in graph DB (non-fatal)
+    if resolution is not None and resolution.resolved and store is not None:
+        try:
+            for resolved in resolution.resolved:
+                store.update_finding_status(resolved["node_id"], FindingStatus.RESOLVED)
+            print(f"  Marked {len(resolution.resolved)} findings as resolved")
+        except Exception as exc:
+            print(f"::warning::Failed to update finding status: {exc}")
+
+    # 8. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
         with open(github_output, "a") as f:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -30,16 +32,14 @@ from grippy.schema import (
 EMBED_DIM = 8
 
 
-def _fake_embed(texts: list[str]) -> list[list[float]]:
-    """Deterministic fake embeddings — hash-based, fixed dimension."""
-    import hashlib
+class _FakeEmbedder:
+    """Deterministic fake embedder — hash-based, fixed dimension."""
 
-    results = []
-    for text in texts:
+    def get_embedding(self, text: str) -> list[float]:
+        import hashlib
+
         h = hashlib.sha256(text.encode()).digest()
-        vec = [float(b) / 255.0 for b in h[:EMBED_DIM]]
-        results.append(vec)
-    return results
+        return [float(b) / 255.0 for b in h[:EMBED_DIM]]
 
 
 def _make_finding(
@@ -132,7 +132,7 @@ def store(tmp_path: Path) -> GrippyStore:
     return GrippyStore(
         graph_db_path=tmp_path / "grippy-graph.db",
         lance_dir=tmp_path / "lance",
-        embed_fn=_fake_embed,
+        embedder=_FakeEmbedder(),
     )
 
 
@@ -146,7 +146,7 @@ class TestGrippyStoreInit:
         GrippyStore(
             graph_db_path=db_path,
             lance_dir=tmp_path / "lance",
-            embed_fn=_fake_embed,
+            embedder=_FakeEmbedder(),
         )
         assert db_path.exists()
 
@@ -156,7 +156,7 @@ class TestGrippyStoreInit:
         GrippyStore(
             graph_db_path=tmp_path / "grippy-graph.db",
             lance_dir=lance_dir,
-            embed_fn=_fake_embed,
+            embedder=_FakeEmbedder(),
         )
         assert lance_dir.exists()
 
@@ -326,3 +326,215 @@ class TestVectorSearch:
         store.store_review(review_to_graph(review))
         results = store.search_nodes("bug", k=3)
         assert len(results) <= 3
+
+
+# --- Resolution queries ---
+
+
+class TestResolutionQueries:
+    """GrippyStore resolution matching for finding lifecycle."""
+
+    def test_get_prior_findings_returns_open_findings(self, store: GrippyStore) -> None:
+        """get_prior_findings returns findings with status='open'."""
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph, session_id="pr-1")
+        findings = store.get_prior_findings(session_id="pr-1")
+        assert len(findings) > 0
+        for f in findings:
+            assert f["status"] == "open"
+
+    def test_get_prior_findings_empty_when_no_reviews(self, store: GrippyStore) -> None:
+        """No stored reviews -> empty list."""
+        findings = store.get_prior_findings(session_id="pr-nonexistent")
+        assert findings == []
+
+    def test_get_prior_findings_scoped_by_session(self, store: GrippyStore) -> None:
+        """Prior findings are scoped to session_id (PR), not individual review."""
+        # Round 1: store with session_id
+        review_r1 = _make_review(
+            title="feat: auth",
+            timestamp="2026-02-26T12:00:00Z",
+            findings=[_make_finding(title="SQL injection", file="auth.py")],
+        )
+        graph_r1 = review_to_graph(review_r1)
+        store.store_review(graph_r1, session_id="pr-5")
+
+        # Round 2: query BEFORE storing — should see round 1's findings
+        prior = store.get_prior_findings(session_id="pr-5")
+        assert len(prior) == 1
+        assert prior[0]["title"] == "SQL injection"
+
+    def test_prior_findings_excludes_other_sessions(self, store: GrippyStore) -> None:
+        """Findings from different PRs are not returned."""
+        review_pr5 = _make_review(
+            title="PR 5",
+            timestamp="2026-02-26T12:00:00Z",
+            findings=[_make_finding(title="Bug in PR 5", file="a.py")],
+        )
+        review_pr6 = _make_review(
+            title="PR 6",
+            timestamp="2026-02-26T12:01:00Z",
+            findings=[_make_finding(title="Bug in PR 6", file="b.py")],
+        )
+        store.store_review(review_to_graph(review_pr5), session_id="pr-5")
+        store.store_review(review_to_graph(review_pr6), session_id="pr-6")
+
+        prior_5 = store.get_prior_findings(session_id="pr-5")
+        prior_6 = store.get_prior_findings(session_id="pr-6")
+        assert all(f["title"] == "Bug in PR 5" for f in prior_5)
+        assert all(f["title"] == "Bug in PR 6" for f in prior_6)
+
+    def test_update_finding_status(self, store: GrippyStore) -> None:
+        """update_finding_status changes a finding's status in node_meta."""
+        import json as _json
+
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
+        assert len(finding_nodes) > 0
+        nid = finding_nodes[0].id
+        store.update_finding_status(nid, "resolved")
+        cur = store._conn.cursor()
+        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
+        props = _json.loads(cur.fetchone()["properties"])
+        assert props["status"] == "resolved"
+
+
+# --- Migration safety (Commit 4, Issue #4) ---
+
+
+class TestUpdateFindingStatusWithEnum:
+    """update_finding_status accepts FindingStatus enum."""
+
+    def test_update_finding_status_with_enum(self, store: GrippyStore) -> None:
+        """update_finding_status accepts FindingStatus.RESOLVED."""
+        import json as _json
+
+        from grippy.graph import FindingStatus
+
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
+        assert len(finding_nodes) > 0
+        nid = finding_nodes[0].id
+        store.update_finding_status(nid, FindingStatus.RESOLVED)
+        cur = store._conn.cursor()
+        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
+        props = _json.loads(cur.fetchone()["properties"])
+        assert props["status"] == "resolved"
+
+
+class TestMigrationSafety:
+    """Migration error handling: ignore 'already exists', propagate real errors."""
+
+    def test_real_error_propagates(self, tmp_path: Path) -> None:
+        """OperationalError without 'already exists' propagates."""
+        import grippy.persistence as persistence_mod
+
+        # Inject a migration that triggers a real error (invalid SQL)
+        original_migrations = persistence_mod._MIGRATIONS
+        persistence_mod._MIGRATIONS = [
+            "ALTER TABLE nonexistent_table ADD COLUMN bad_col TEXT",
+        ]
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="no such table"):
+                GrippyStore(
+                    graph_db_path=tmp_path / "test.db",
+                    lance_dir=tmp_path / "lance",
+                    embedder=_FakeEmbedder(),
+                )
+        finally:
+            persistence_mod._MIGRATIONS = original_migrations
+
+    def test_already_exists_ignored(self, tmp_path: Path) -> None:
+        """First init creates column, second init silently ignores 'already exists'."""
+        GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+        # Second init — migration should not raise
+        store2 = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance2",
+            embedder=_FakeEmbedder(),
+        )
+        assert store2 is not None
+
+
+# --- Batch embedding protocol (Commit 4, Issue #8) ---
+
+
+class _FakeBatchEmbedder:
+    """Embedder that supports both single and batch embedding."""
+
+    def get_embedding(self, text: str) -> list[float]:
+        import hashlib
+
+        h = hashlib.sha256(text.encode()).digest()
+        return [float(b) / 255.0 for b in h[:EMBED_DIM]]
+
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.get_embedding(t) for t in texts]
+
+
+class TestBatchEmbedding:
+    """GrippyStore uses batch embedding when available."""
+
+    def test_batch_embedder_used_when_available(self, tmp_path: Path) -> None:
+        """Embedder with get_embedding_batch is called once for all texts."""
+        embedder = _FakeBatchEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+
+        with patch.object(
+            embedder, "get_embedding_batch", wraps=embedder.get_embedding_batch
+        ) as mock_batch:
+            store.store_review(graph)
+            # Batch should be called once with all texts
+            mock_batch.assert_called_once()
+            texts_arg = mock_batch.call_args[0][0]
+            assert len(texts_arg) == len(graph.nodes)
+
+    def test_single_embedder_fallback(self, tmp_path: Path) -> None:
+        """Embedder without get_embedding_batch falls back to individual calls."""
+        embedder = _FakeEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+
+        with patch.object(embedder, "get_embedding", wraps=embedder.get_embedding) as mock_single:
+            store.store_review(graph)
+            # Single should be called N times (once per node)
+            assert mock_single.call_count == len(graph.nodes)
+
+    def test_batch_embedder_stores_correct_vectors(self, tmp_path: Path) -> None:
+        """Batch result vectors are correctly associated with their records."""
+        embedder = _FakeBatchEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+
+        nodes = store.get_all_nodes()
+        assert len(nodes) > 0
+        # Each node should have a vector
+        for node in nodes:
+            assert "vector" in node
+            assert len(node["vector"]) == EMBED_DIM

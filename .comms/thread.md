@@ -556,3 +556,121 @@ Design doc and implementation plan updated. Starting implementation now — Task
 - Vector similarity deferred to v1.1; fingerprint matching for v1
 
 ---
+[2026-02-26] **alpha**: **Session 12 — cleanup sprint, context at 3%.**
+
+**What shipped:**
+- PR #6 squash-merged to main (`e2d4ba2`)
+- Split unstaged work into 5 PRs:
+  - #7 `fix/spec-drift-quality-gate` — config corrections (Alpha, ready to merge)
+  - #8 `docs/readme-claude-rewrite` — CLAUDE.md + README rewrite with badges (Alpha, F3 fixed)
+  - #9 `feat/license-header-pack` — SPDX header template for base pack (**Bravo: review**)
+  - #10 `chore/archive-thread` — thread sessions 1-8 archived (Alpha, ready to merge)
+  - #11 `fix/grippy-model-hallucination` — LLM self-reports wrong model name (**Bravo: review**)
+- `feat/grippy-pr-ux` branch created from merged main, 3 cherry-picked commits (design doc, plan, Bravo review)
+
+**Key discovery:** `GrippyReview.model` is self-reported by the LLM in structured output. GPT-5.2 hallucinates its own name as `gpt-4.1` in varying formats. CI logs confirm `model=gpt-5.2` is correctly sent. Fix in PR #11 overrides with configured `GRIPPY_MODEL_ID`.
+
+**Grippy meta-observations (PRs #7, #8):**
+- Signal-to-noise excellent — finds real issues, low FP rate
+- Recurring FP: `Project-Navi/repo` flagged as suspicious placeholder (repo literally named "repo")
+- Category scores inconsistent between PRs — schema enforcement gap
+- Duration always 0ms — timer broken
+- Personality calibration strong
+
+**Bravo dispatch:** Review PRs #9 and #11. Both touch your domain (pack templates, Grippy agent plumbing). PR #11 is the model hallucination fix — check if there's a better source for model name (e.g., Agno `RunOutput.model` or `provider_data`).
+
+**Alpha next session:** Merge #7, #8, #10. Check Bravo's reviews on #9, #11. Then start 13-task implementation on `feat/grippy-pr-ux`.
+
+---
+
+---
+
+## Bravo — Session 13 (2026-02-27)
+
+**Rebooted as Bravo.** Nelson asked me to address Grippy comments on PRs #9 and #11, then review PR #12.
+
+### PRs #9 and #11 — Grippy findings addressed
+
+**PR #9** (`feat/license-header-pack`):
+- F1 (HIGH) fixed: SPDX pattern `^[A-Za-z0-9][A-Za-z0-9.+-]*$` + `minLength: 1` in schema, `| trim` in template, trimmed conditional. 10 new tests.
+- F2 (MEDIUM): FP — atomic generation in same `nboot apply`.
+- F3 (MEDIUM): FP — consistent with existing tag pinning convention.
+- Round 2: fixed conditional trim, pushed back on repeated FPs.
+- **Merged to main** (squash).
+
+**PR #11** (`fix/grippy-model-hallucination`):
+- F1 (HIGH): FP — `model_id` is single source of truth, no fallback path.
+- F2 (MEDIUM) fixed: added direct `assert review.model` + serialization boundary assertion.
+- **Also fixed scoring bug:** Added `Field(ge=0, le=100)` to all 5 `ScoreBreakdown` fields. LLM was outputting deduction-style negatives.
+- **Merged to main** (squash). Rebased PRs #7, #8, #10, and `feat/grippy-pr-ux`.
+
+### PR #12 — Code review + fixes
+
+Nelson asked for honest assessment before fixing. Read all new code (3664 additions across 16 files).
+
+**Assessment delivered:**
+- Works well: clean module boundaries, graceful degradation, Embedder protocol, dead code cleanup
+- Beautiful: graph data model, FindingLifecycle concept, two-layer comment architecture
+- Issues found: 5 bugs/gaps
+
+**Fixes implemented (commit `792ee97`):**
+
+1. **Semantic bug (critical):** `get_prior_findings` queried current review's ID, returning just-stored findings. Fixed: added `session_id` column to `node_meta` with migration, query BEFORE store, scoped by `pr-{N}`. Nelson chose PR-scoped over repo-scoped.
+
+2. **Duplicate resolution logic:** Nelson chose to keep both — `cross_reference_findings` (graph.py, pure/offline) and `resolve_findings_against_prior` (github_review.py, DB-backed). Added docstring marking intent.
+
+3. **Wired `update_finding_status`:** Nelson chose status tracking without auto-resolving threads (no UI side effects). `post_review` now returns `ResolutionResult`. Resolved findings marked in DB.
+
+4. **Ghost review fix:** Removed `body=""` from `create_review` batch continuation.
+
+5. **CI fixes:** `ruff format` on 4 files, added `types-requests` dev dep. mypy clean.
+
+**548 tests passing, ruff/mypy clean.**
+
+### Deferred to next session
+- **Adversarial audit:** `resolve_threads` GraphQL mutation has string interpolation of `thread_id` (potential injection). `_with_timeout` SIGALRM handler is not re-entrant safe.
+- **Thread auto-resolution:** Built, tested, not wired. Nelson wants to see UX in production first.
+
+### Alpha's next task
+- Check Grippy's re-review on PR #12 (CI should be green now)
+- Address any new findings
+- Continue with remaining open PRs (#7, #8, #10)
+- Start adversarial audit Bravo flagged
+
+---
+[2026-02-27] **alpha**: **Session 14 — Grippy audit fix sprint complete, pushed to PR #12.**
+
+### What happened
+
+Grippy's own review of PR #12 scored it 58/100 FAIL with 7 findings. A thorough audit found 10 issues across 5 files. Nelson approved a 7-commit fix plan and I executed it with TDD discipline.
+
+### Commits (7, all on `feat/grippy-pr-ux`, pushed)
+
+| # | Commit | Issues | Key changes |
+|---|--------|--------|-------------|
+| 1 | `a1a12ca` fix: diff parser + 422 fallback | #1 CRIT + #5 MED | `parse_diff_lines` only treats `' '` as context; `post_review` catches 422 per batch |
+| 2 | `24d21d0` fix: fingerprint + frozen | #3 HIGH + #7 MED | Normalize fingerprint (strip/lower/`.value`); Finding model frozen |
+| 3 | `cff51e9` fix: GraphQL variables | #2 HIGH (security) | `resolve_threads` uses `$threadId` GraphQL variable, not string interpolation |
+| 4 | `260c5c1` fix: migration + batch embed | #4 HIGH + #8 MED | Migration only ignores "already exists"/"duplicate column"; `BatchEmbedder` protocol |
+| 5 | `5dc888a` fix: post_review try/except | #6 MED | `main()` catches post_review failure, posts error comment, exit still based on verdict |
+| 6 | `1048af0` refactor: FindingStatus enum | #9 LOW + #10 LOW | `FindingStatus(StrEnum)` replaces string literals; docstring on dual resolution logic |
+| 7 | `d451223` test: verification + lint | — | Format, lint, mypy clean |
+
+### Numbers
+
+- **572 tests passing** (up from 548), 1 skipped
+- **24 new tests**, 706 lines added, 39 removed across 10 files
+- ruff format/check, mypy all clean
+- Pushed to `feat/grippy-pr-ux`, awaiting Grippy re-review
+
+### Discussion: Grippy state persistence
+
+Nelson asked about creating an org-level `grippy-state` repo for SQLite+LanceDB. I recommended **GitHub Actions cache** instead — saves/restores per branch, no concurrency issues, no binary bloat. Nelson asked about PR save restrictions; I clarified caches save on any branch (including PRs), the restriction is only on cross-branch restore (PRs can't feed `main` cache). 7-day eviction is acceptable for v1.
+
+### Alpha's next task on reboot
+1. Check Grippy's re-review results on PR #12 (should score higher now)
+2. If clean → merge PR #12
+3. Wire Actions cache for Grippy state persistence (if Nelson approves)
+4. Grippy meta-analysis: compare review quality before/after fixes
+5. Plan next phase with Nelson
+

@@ -10,11 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from grippy.review import (
-    COMMENT_MARKER_PREFIX,
     MAX_DIFF_CHARS,
     _with_timeout,
     fetch_pr_diff,
-    format_review_comment,
     load_pr_event,
     parse_review_response,
     post_comment,
@@ -23,9 +21,6 @@ from grippy.review import (
 from grippy.schema import (
     AsciiArtKey,
     ComplexityTier,
-    Escalation,
-    EscalationCategory,
-    EscalationTarget,
     Finding,
     FindingCategory,
     GrippyReview,
@@ -184,97 +179,6 @@ class TestLoadPrEvent:
 # --- format_review_comment ---
 
 
-class TestFormatReviewComment:
-    def test_contains_verdict_header(self) -> None:
-        """Comment starts with verdict status as header."""
-        review = _make_review()
-        comment = format_review_comment(review)
-        assert "Grippy Review" in comment
-        assert "PROVISIONAL" in comment
-
-    def test_contains_score(self) -> None:
-        """Comment includes the overall score."""
-        review = _make_review()
-        comment = format_review_comment(review)
-        assert "72" in comment
-        assert "/100" in comment
-
-    def test_contains_findings(self) -> None:
-        """Comment lists each finding with severity and title."""
-        review = _make_review()
-        comment = format_review_comment(review)
-        assert "HIGH" in comment
-        assert "SQL injection in query builder" in comment
-        assert "src/app.py" in comment
-
-    def test_contains_personality(self) -> None:
-        """Comment includes Grippy's personality elements."""
-        review = _make_review()
-        comment = format_review_comment(review)
-        assert "*adjusts reading glasses*" in comment
-        assert "Fix it or I'm telling the security team." in comment
-
-    def test_empty_findings_shows_clean(self) -> None:
-        """Review with no findings shows a clean message."""
-        review = _make_review(
-            findings=[],
-            score=Score(
-                overall=100,
-                breakdown=ScoreBreakdown(
-                    security=100, logic=100, governance=100, reliability=100, observability=100
-                ),
-                deductions=ScoreDeductions(
-                    critical_count=0, high_count=0, medium_count=0, low_count=0, total_deduction=0
-                ),
-            ),
-            verdict=Verdict(
-                status=VerdictStatus.PASS,
-                threshold_applied=70,
-                merge_blocking=False,
-                summary="Ship it.",
-            ),
-        )
-        comment = format_review_comment(review)
-        assert "No findings" in comment or "PASS" in comment
-
-    def test_finding_links_to_file_line(self) -> None:
-        """Each finding references file:line for easy navigation."""
-        review = _make_review(findings=[_make_finding(file="src/auth.py", line_start=99)])
-        comment = format_review_comment(review)
-        assert "src/auth.py" in comment
-
-    def test_escalations_included(self) -> None:
-        """Escalations are shown in the comment."""
-        escalation = Escalation(
-            id="E-001",
-            severity="CRITICAL",
-            category=EscalationCategory.SECURITY,
-            summary="Credentials in source code",
-            details="API key hardcoded in config.py",
-            recommended_target=EscalationTarget.SECURITY_TEAM,
-            blocking=True,
-        )
-        review = _make_review(escalations=[escalation])
-        comment = format_review_comment(review)
-        assert "Escalation" in comment or "E-001" in comment
-        assert "Credentials in source code" in comment
-
-    def test_merge_blocking_flagged(self) -> None:
-        """Merge-blocking verdict is clearly marked."""
-        review = _make_review(
-            verdict=Verdict(
-                status=VerdictStatus.FAIL,
-                threshold_applied=70,
-                merge_blocking=True,
-                summary="Critical security issues found.",
-            ),
-        )
-        comment = format_review_comment(review)
-        assert "FAIL" in comment
-        # Should indicate merge is blocked
-        assert "block" in comment.lower() or "FAIL" in comment
-
-
 # --- parse_review_response ---
 
 
@@ -400,53 +304,8 @@ class TestFetchPrDiffForkHandling:
 
 class TestPostComment:
     @patch("github.Github")
-    def test_creates_new_comment_for_new_sha(self, mock_gh_cls: MagicMock) -> None:
-        """New SHA creates a new comment."""
-        mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = []
-        mock_repo = MagicMock()
-        mock_repo.get_pull.return_value = mock_pr
-        mock_gh_cls.return_value.get_repo.return_value = mock_repo
-
-        post_comment("token", "org/repo", 42, "Review body", head_sha="abc123")
-
-        mock_pr.create_issue_comment.assert_called_once()
-
-    @patch("github.Github")
-    def test_edits_existing_comment_for_same_sha(self, mock_gh_cls: MagicMock) -> None:
-        """Re-run on same SHA edits the existing comment."""
-        existing_comment = MagicMock()
-        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
-        mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = [existing_comment]
-        mock_repo = MagicMock()
-        mock_repo.get_pull.return_value = mock_pr
-        mock_gh_cls.return_value.get_repo.return_value = mock_repo
-
-        post_comment("token", "org/repo", 42, "New review", head_sha="abc123")
-
-        existing_comment.edit.assert_called_once_with("New review")
-        mock_pr.create_issue_comment.assert_not_called()
-
-    @patch("github.Github")
-    def test_new_comment_for_different_sha(self, mock_gh_cls: MagicMock) -> None:
-        """Different SHA creates new comment even if old review exists."""
-        existing_comment = MagicMock()
-        existing_comment.body = f"Old review\n{COMMENT_MARKER_PREFIX}abc123 -->"
-        mock_pr = MagicMock()
-        mock_pr.get_issue_comments.return_value = [existing_comment]
-        mock_repo = MagicMock()
-        mock_repo.get_pull.return_value = mock_pr
-        mock_gh_cls.return_value.get_repo.return_value = mock_repo
-
-        post_comment("token", "org/repo", 42, "New review", head_sha="def456")
-
-        mock_pr.create_issue_comment.assert_called_once()
-        existing_comment.edit.assert_not_called()
-
-    @patch("github.Github")
-    def test_no_sha_always_creates_new(self, mock_gh_cls: MagicMock) -> None:
-        """Without head_sha, always creates a new comment (error comments)."""
+    def test_creates_issue_comment(self, mock_gh_cls: MagicMock) -> None:
+        """post_comment creates an issue comment on the PR."""
         mock_pr = MagicMock()
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pr
@@ -455,187 +314,6 @@ class TestPostComment:
         post_comment("token", "org/repo", 42, "Error comment")
 
         mock_pr.create_issue_comment.assert_called_once()
-
-
-# --- T2: make_embed_fn ---
-
-
-class TestMakeEmbedFn:
-    """Tests for make_embed_fn — LM Studio /v1/embeddings wrapper."""
-
-    @patch("requests.post")
-    def test_calls_embeddings_endpoint(self, mock_post: MagicMock) -> None:
-        """embed_fn hits /v1/embeddings with correct model and input."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        result = fn(["hello world"])
-
-        assert result == [[0.1, 0.2, 0.3]]
-        mock_post.assert_called_once()
-        call_json = mock_post.call_args[1]["json"]
-        assert call_json["model"] == "test-model"
-        assert call_json["input"] == ["hello world"]
-
-    @patch("requests.post")
-    def test_batch_embedding(self, mock_post: MagicMock) -> None:
-        """embed_fn handles multiple texts in one call."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "data": [
-                {"embedding": [0.1, 0.2]},
-                {"embedding": [0.3, 0.4]},
-            ]
-        }
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        result = fn(["text1", "text2"])
-
-        assert len(result) == 2
-        assert result[0] == [0.1, 0.2]
-        assert result[1] == [0.3, 0.4]
-
-    @patch("requests.post")
-    def test_http_error_propagates(self, mock_post: MagicMock) -> None:
-        """HTTP errors from embedding endpoint propagate."""
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = Exception("503 Service Unavailable")
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        with pytest.raises(Exception, match="503"):
-            fn(["hello"])
-
-    @patch("requests.post")
-    def test_openai_key_sent_to_openai_host(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OPENAI_API_KEY is sent when endpoint is api.openai.com."""
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
-        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert headers.get("Authorization") == "Bearer sk-openai-test"
-
-    @patch("requests.post")
-    def test_openai_key_not_sent_to_non_openai_host(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OPENAI_API_KEY is NOT sent to non-OpenAI endpoints."""
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
-        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.1]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert "Authorization" not in headers
-
-    @patch("requests.post")
-    def test_grippy_api_key_sent_to_any_host(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """GRIPPY_API_KEY is used for any endpoint."""
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-secret")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.2]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert headers.get("Authorization") == "Bearer grippy-secret"
-
-    @patch("requests.post")
-    def test_no_auth_when_no_keys(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """No Authorization header when neither key is set."""
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.3]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert "Authorization" not in headers
-
-    @patch("requests.post")
-    def test_openai_key_precedence_on_openai_host(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """OPENAI_API_KEY takes precedence over GRIPPY_API_KEY on OpenAI host."""
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.4]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("https://api.openai.com/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert headers.get("Authorization") == "Bearer sk-openai"
-
-    @patch("requests.post")
-    def test_non_openai_host_with_both_keys_uses_grippy(
-        self, mock_post: MagicMock, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Non-OpenAI host with both keys uses GRIPPY_API_KEY, not OPENAI_API_KEY."""
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-        monkeypatch.setenv("GRIPPY_API_KEY", "grippy-key")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"data": [{"embedding": [0.5]}]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        from grippy.review import make_embed_fn
-
-        fn = make_embed_fn("http://localhost:1234/v1", "test-model")
-        fn(["hello"])
-
-        headers = mock_post.call_args[1].get("headers", {})
-        assert headers.get("Authorization") == "Bearer grippy-key"
 
 
 # --- T1: main() uses run_review + review_to_graph + GrippyStore ---
@@ -660,7 +338,7 @@ class TestMainWiringNewAPI:
         event_path.write_text(json.dumps(event))
         return event_path
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -673,7 +351,7 @@ class TestMainWiringNewAPI:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -695,7 +373,7 @@ class TestMainWiringNewAPI:
         mock_run_review.assert_called_once()
         mock_create.return_value.run.assert_not_called()
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -708,7 +386,7 @@ class TestMainWiringNewAPI:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -729,7 +407,7 @@ class TestMainWiringNewAPI:
 
         mock_to_graph.assert_called_once_with(review)
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -742,7 +420,7 @@ class TestMainWiringNewAPI:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -762,9 +440,9 @@ class TestMainWiringNewAPI:
         main()
 
         mock_store_cls.assert_called_once()
-        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph, session_id="pr-1")
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -777,11 +455,11 @@ class TestMainWiringNewAPI:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Persistence failure should not prevent the review comment from posting."""
+        """Persistence failure should not prevent the review from posting."""
         event_path = self._make_event_file(tmp_path)
         mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
         mock_run_review.return_value = _make_review()
@@ -797,8 +475,8 @@ class TestMainWiringNewAPI:
         # Should NOT raise — persistence failure is non-fatal
         main()
 
-        # Comment should still be posted
-        mock_post.assert_called_once()
+        # post_review should still be called
+        mock_post_review.assert_called_once()
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.run_review")
@@ -970,24 +648,24 @@ class TestMainOrchestration:
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
-    def test_happy_path_posts_comment_and_persists(
+    def test_happy_path_posts_review_and_persists(
         self,
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Happy path: review succeeds, comment posted, graph persisted."""
+        """Happy path: review succeeds, post_review called, graph persisted."""
         event_path = self._make_event_file(tmp_path)
         self._setup_env(monkeypatch, event_path, tmp_path)
 
@@ -1001,15 +679,13 @@ class TestMainOrchestration:
 
         main()
 
-        # Comment was posted with "Grippy Review" in the body
-        mock_post.assert_called_once()
-        posted_body = mock_post.call_args[0][3]
-        assert "Grippy Review" in posted_body
+        # post_review was called (replaces old post_comment path)
+        mock_post_review.assert_called_once()
 
         # Graph was persisted
-        mock_store_cls.return_value.store_review.assert_called_once_with(graph)
+        mock_store_cls.return_value.store_review.assert_called_once_with(graph, session_id="pr-7")
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -1022,7 +698,7 @@ class TestMainOrchestration:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1046,11 +722,6 @@ class TestMainOrchestration:
         # The overridden value reached the serialization boundary
         mock_to_graph.assert_called_once()
         assert mock_to_graph.call_args[0][0].model == "gpt-5.2"
-
-        # The posted comment should contain the configured model, not the hallucinated one
-        posted_body = mock_post.call_args[0][3]
-        assert "gpt-5.2" in posted_body
-        assert "hallucinated-gpt-4.1" not in posted_body
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.run_review")
@@ -1120,7 +791,7 @@ class TestMainOrchestration:
         posted_body = mock_post.call_args[0][3]
         assert "PARSE ERROR" in posted_body
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -1133,11 +804,11 @@ class TestMainOrchestration:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Merge-blocking verdict posts review comment then exits 1."""
+        """Merge-blocking verdict posts review then exits 1."""
         event_path = self._make_event_file(tmp_path)
         self._setup_env(monkeypatch, event_path, tmp_path)
 
@@ -1160,13 +831,11 @@ class TestMainOrchestration:
 
         assert exc_info.value.code == 1
 
-        # Review comment was still posted (not an error comment)
-        mock_post.assert_called_once()
-        posted_body = mock_post.call_args[0][3]
-        assert "Grippy Review" in posted_body
-        assert "FAIL" in posted_body
+        # post_review was still called (not an error comment)
+        mock_post_review.assert_called_once()
+        assert mock_post_review.call_args[1]["verdict"] == "FAIL"
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -1179,7 +848,7 @@ class TestMainOrchestration:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1210,7 +879,7 @@ class TestMainOrchestration:
         assert call_kwargs["model_id"] == "devstral-small-2-24b-instruct-2512"
         assert call_kwargs["transport"] is None
 
-    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
     @patch("grippy.review.GrippyStore")
     @patch("grippy.review.review_to_graph")
     @patch("grippy.review.run_review")
@@ -1223,7 +892,7 @@ class TestMainOrchestration:
         mock_run_review: MagicMock,
         mock_to_graph: MagicMock,
         mock_store_cls: MagicMock,
-        mock_post: MagicMock,
+        mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -1243,3 +912,250 @@ class TestMainOrchestration:
 
         call_kwargs = mock_create.call_args[1]
         assert call_kwargs["transport"] == "openai"
+
+
+class TestMainReviewIntegration:
+    """main() uses new post_review and create_embedder."""
+
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    @patch("grippy.review.load_pr_event")
+    def test_main_calls_post_review(
+        self,
+        mock_load: MagicMock,
+        mock_diff: MagicMock,
+        mock_create: MagicMock,
+        mock_run: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """main() should call post_review instead of post_comment."""
+        event_file = tmp_path / "event.json"
+        event_file.write_text(
+            '{"pull_request": {"number": 1, "title": "test", "user": {"login": "dev"}, '
+            '"head": {"ref": "feat", "sha": "abc123"}, "base": {"ref": "main"}}, '
+            '"repository": {"full_name": "org/repo"}}'
+        )
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "local")
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.setattr(
+            "grippy.review.__file__",
+            str(tmp_path / "fake" / "grippy" / "review.py"),
+        )
+
+        mock_load.return_value = {
+            "pr_number": 1,
+            "repo": "org/repo",
+            "title": "test",
+            "author": "dev",
+            "head_ref": "feat",
+            "head_sha": "abc123",
+            "base_ref": "main",
+            "description": "",
+        }
+        mock_diff.return_value = "diff --git a/x.py b/x.py\n"
+
+        mock_review = _make_review(findings=[])
+        mock_run.return_value = mock_review
+
+        from grippy.review import main
+
+        main()
+
+        mock_post.assert_called_once()
+
+
+# --- post_review failure handling (Commit 5, Issue #6) ---
+
+
+class TestMainPostReviewFailure:
+    """main() should gracefully handle post_review failures."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 1,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat", "sha": "abc123"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_posts_error_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review failure -> error comment posted, exit based on verdict."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        main()  # verdict is not merge-blocking, so should exit 0
+
+        mock_post_comment.assert_called_once()
+        body = mock_post_comment.call_args[0][3]
+        assert "failed to post inline comments" in body.lower() or "failed to post" in body.lower()
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_still_exits_merge_blocking(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review fails + merge-blocking verdict -> exit 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review(
+            verdict=Verdict(
+                status=VerdictStatus.FAIL,
+                threshold_applied=70,
+                merge_blocking=True,
+                summary="Critical issues found.",
+            ),
+        )
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_failure_graceful_on_pass(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review fails + PASS verdict -> exit 0."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()  # default is non-blocking
+        mock_to_graph.return_value = MagicMock(nodes=[])
+        mock_post_review.side_effect = RuntimeError("GitHub API is down")
+
+        from grippy.review import main
+
+        # Should NOT raise — non-blocking verdict, posting failure is non-fatal
+        main()
+
+
+class TestTransportErrorUX:
+    """Invalid GRIPPY_TRANSPORT posts error comment and exits."""
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.load_pr_event")
+    def test_invalid_transport_posts_error_comment(
+        self,
+        mock_load: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid transport causes error comment and sys.exit(1)."""
+        event_file = tmp_path / "event.json"
+        event_file.write_text(
+            '{"pull_request": {"number": 1, "title": "t", "user": {"login": "d"}, '
+            '"head": {"ref": "f", "sha": "a"}, "base": {"ref": "m"}}, '
+            '"repository": {"full_name": "o/r"}}'
+        )
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
+        monkeypatch.setenv("GRIPPY_TRANSPORT", "invalid-transport")
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.setattr(
+            "grippy.review.__file__",
+            str(tmp_path / "fake" / "grippy" / "review.py"),
+        )
+
+        mock_load.return_value = {
+            "pr_number": 1,
+            "repo": "o/r",
+            "title": "t",
+            "author": "d",
+            "head_ref": "f",
+            "head_sha": "a",
+            "base_ref": "m",
+            "description": "",
+        }
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit):
+            main()
+
+        # Should have posted an error comment
+        mock_post_comment.assert_called_once()
+        body = mock_post_comment.call_args[0][3]  # 4th positional arg is body
+        assert "CONFIG ERROR" in body
