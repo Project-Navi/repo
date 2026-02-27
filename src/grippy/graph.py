@@ -16,6 +16,11 @@ from pydantic import BaseModel
 from grippy.schema import Finding, GrippyReview
 
 
+class FindingStatus(StrEnum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+
+
 class EdgeType(StrEnum):
     VIOLATES = "VIOLATES"
     FOUND_IN = "FOUND_IN"
@@ -189,7 +194,7 @@ def review_to_graph(review: GrippyReview) -> ReviewGraph:
                     "line_end": finding.line_end,
                     "evidence": finding.evidence,
                     "fingerprint": finding.fingerprint,
-                    "status": "open",
+                    "status": FindingStatus.OPEN,
                 },
                 edges=finding_edges,
                 created_at=review.timestamp,
@@ -218,9 +223,19 @@ def cross_reference_findings(
 ) -> FindingLifecycle:
     """Compare current vs previous findings by fingerprint (pure, no DB).
 
-    For offline/CLI analysis of two GrippyReview objects. The DB-backed
-    version used in CI is resolve_findings_against_prior() in github_review.py,
-    which carries node_id for thread resolution and status updates.
+    This is the **pure** resolution function — takes two lists of Finding
+    objects and returns their lifecycle classification. Used for offline/CLI
+    analysis of two GrippyReview objects.
+
+    The **DB-backed** counterpart is ``resolve_findings_against_prior()`` in
+    ``github_review.py``, which operates on dicts (with ``node_id``,
+    ``fingerprint``, ``title``) from ``GrippyStore.get_prior_findings()``.
+    That function is used in CI to carry ``node_id`` references needed for
+    thread resolution and ``FindingStatus`` updates in the graph DB.
+
+    Both functions are intentionally separate:
+    - This one is pure, testable, and DB-independent.
+    - The github_review one is coupled to the persistence layer by design.
 
     Returns a FindingLifecycle with:
     - new: findings in current but not previous

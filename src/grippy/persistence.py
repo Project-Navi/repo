@@ -17,7 +17,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import lancedb  # type: ignore[import-untyped]
 
-from grippy.graph import EdgeType, NodeType, ReviewGraph
+from grippy.graph import EdgeType, FindingStatus, NodeType, ReviewGraph
 
 # --- Types ---
 
@@ -373,7 +373,7 @@ class GrippyStore:
                 results.append(props)
         return results
 
-    def update_finding_status(self, node_id: str, status: str) -> None:
+    def update_finding_status(self, node_id: str, status: str | FindingStatus) -> None:
         """Update a finding's status in node_meta properties."""
         cur = self._conn.cursor()
         cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (node_id,))

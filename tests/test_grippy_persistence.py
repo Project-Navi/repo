@@ -405,6 +405,28 @@ class TestResolutionQueries:
 # --- Migration safety (Commit 4, Issue #4) ---
 
 
+class TestUpdateFindingStatusWithEnum:
+    """update_finding_status accepts FindingStatus enum."""
+
+    def test_update_finding_status_with_enum(self, store: GrippyStore) -> None:
+        """update_finding_status accepts FindingStatus.RESOLVED."""
+        import json as _json
+
+        from grippy.graph import FindingStatus
+
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
+        assert len(finding_nodes) > 0
+        nid = finding_nodes[0].id
+        store.update_finding_status(nid, FindingStatus.RESOLVED)
+        cur = store._conn.cursor()
+        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
+        props = _json.loads(cur.fetchone()["properties"])
+        assert props["status"] == "resolved"
+
+
 class TestMigrationSafety:
     """Migration error handling: ignore 'already exists', propagate real errors."""
 

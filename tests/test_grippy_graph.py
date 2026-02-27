@@ -5,6 +5,7 @@ from __future__ import annotations
 from grippy.graph import (
     Edge,
     EdgeType,
+    FindingStatus,
     Node,
     NodeType,
     ReviewGraph,
@@ -408,6 +409,25 @@ class TestEdgeTypeAdditions:
 
 
 # --- cross_reference_findings ---
+
+
+# --- FindingStatus enum (Commit 6, Issue #9) ---
+
+
+class TestFindingStatus:
+    """FindingStatus enum for finding lifecycle."""
+
+    def test_enum_values(self) -> None:
+        assert FindingStatus.OPEN == "open"
+        assert FindingStatus.RESOLVED == "resolved"
+
+    def test_review_to_graph_uses_finding_status(self) -> None:
+        """Finding node properties use FindingStatus.OPEN, not string literal."""
+        review = _make_review(findings=[_make_finding()])
+        graph = review_to_graph(review)
+        finding_node = next(n for n in graph.nodes if n.type == NodeType.FINDING)
+        assert finding_node.properties["status"] == FindingStatus.OPEN
+        assert finding_node.properties["status"] == "open"
 
 
 class TestCrossReferenceFindings:

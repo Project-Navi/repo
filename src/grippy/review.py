@@ -29,7 +29,7 @@ from typing import Any
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
-from grippy.graph import review_to_graph
+from grippy.graph import FindingStatus, review_to_graph
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.schema import GrippyReview
@@ -395,7 +395,7 @@ def main() -> None:
     if resolution is not None and resolution.resolved and store is not None:
         try:
             for resolved in resolution.resolved:
-                store.update_finding_status(resolved["node_id"], "resolved")
+                store.update_finding_status(resolved["node_id"], FindingStatus.RESOLVED)
             print(f"  Marked {len(resolution.resolved)} findings as resolved")
         except Exception as exc:
             print(f"::warning::Failed to update finding status: {exc}")
