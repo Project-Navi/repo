@@ -418,16 +418,24 @@ def resolve_threads(
     Returns:
         Number of threads successfully resolved.
     """
+    _resolve_mutation = (
+        "mutation ResolveThread($threadId: ID!) { "
+        "resolveReviewThread(input: {threadId: $threadId}) { "
+        "thread { id isResolved } } }"
+    )
     resolved = 0
     for thread_id in thread_ids:
-        mutation = (
-            "mutation { resolveReviewThread(input: "
-            f'{{threadId: "{thread_id}"}}'
-            ") { thread { id isResolved } } }"
-        )
         try:
             result = subprocess.run(
-                ["gh", "api", "graphql", "-f", f"query={mutation}"],
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={_resolve_mutation}",
+                    "-f",
+                    f"threadId={thread_id}",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=30,

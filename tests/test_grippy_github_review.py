@@ -621,6 +621,51 @@ class TestParseDiffLinesEdgeCases:
 # --- post_review 422 fallback (Commit 1, Issue #5) ---
 
 
+# --- resolve_threads GraphQL variables (Commit 3, Issue #2) ---
+
+
+class TestResolveThreadsGraphQLVariables:
+    """resolve_threads must use GraphQL variables, not string interpolation."""
+
+    @patch("grippy.github_review.subprocess.run")
+    def test_uses_graphql_variables(self, mock_run: MagicMock) -> None:
+        """Mutation uses $threadId variable placeholder + separate -f arg."""
+        from grippy.github_review import resolve_threads
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
+        resolve_threads(repo="org/repo", pr_number=1, thread_ids=["PRRT_abc123"])
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        # Must have -f query=... with $threadId variable placeholder
+        query_args = [a for a in cmd if a.startswith("query=")]
+        assert len(query_args) == 1
+        assert "$threadId" in query_args[0]
+        # Must NOT have the thread ID interpolated into the query
+        assert "PRRT_abc123" not in query_args[0]
+        # Must have separate -f threadId=PRRT_abc123
+        thread_args = [a for a in cmd if a.startswith("threadId=")]
+        assert len(thread_args) == 1
+        assert thread_args[0] == "threadId=PRRT_abc123"
+
+    @patch("grippy.github_review.subprocess.run")
+    def test_validates_thread_id_safely(self, mock_run: MagicMock) -> None:
+        """Malicious thread_id is passed as variable, not interpolated."""
+        from grippy.github_review import resolve_threads
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
+        malicious_id = 'malicious"injection'
+        resolve_threads(repo="org/repo", pr_number=1, thread_ids=[malicious_id])
+
+        cmd = mock_run.call_args[0][0]
+        # Query must not contain the malicious string
+        query_args = [a for a in cmd if a.startswith("query=")]
+        assert malicious_id not in query_args[0]
+        # But it should be in the variable arg
+        thread_args = [a for a in cmd if a.startswith("threadId=")]
+        assert thread_args[0] == f"threadId={malicious_id}"
+
+
 class TestPostReview422Fallback:
     """post_review handles GitHub 422 errors by moving findings to summary."""
 
