@@ -265,9 +265,10 @@ def main() -> None:
     print(f"  {file_count} files, {len(diff)} chars")
 
     # H2: cap diff size to avoid overflowing LLM context
+    original_len = len(diff)
     diff = truncate_diff(diff)
-    if len(diff) < file_count:
-        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars")
+    if len(diff) < original_len:
+        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
 
     # 4. Format context
     user_message = format_pr_context(
