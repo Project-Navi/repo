@@ -1040,6 +1040,9 @@ class TestMainOrchestration:
 
         main()
 
+        # The structured field was overridden (not just the comment text)
+        assert review.model == "gpt-5.2"
+
         # The posted comment should contain the configured model, not the hallucinated one
         posted_body = mock_post.call_args[0][3]
         assert "gpt-5.2" in posted_body
