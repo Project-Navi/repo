@@ -29,6 +29,14 @@ class Embedder(Protocol):
     def get_embedding(self, text: str) -> list[float]: ...
 
 
+@runtime_checkable
+class BatchEmbedder(Protocol):
+    """Protocol for embedders that support batch embedding."""
+
+    def get_embedding(self, text: str) -> list[float]: ...
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]: ...
+
+
 def _arrow_table_to_dicts(table: Any) -> list[dict[str, Any]]:
     """Convert a pyarrow Table to a list of dicts without pandas."""
     columns = table.column_names
@@ -107,8 +115,12 @@ class GrippyStore:
         for migration in _MIGRATIONS:
             try:
                 cur.execute(migration)
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if "already exists" in msg or "duplicate column" in msg:
+                    pass  # Column already present — skip
+                else:
+                    raise  # Real error — propagate
         self._conn.commit()
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
@@ -182,7 +194,10 @@ class GrippyStore:
         if not records:
             return
 
-        vectors = [self._embedder.get_embedding(t) for t in texts]
+        if isinstance(self._embedder, BatchEmbedder):
+            vectors = self._embedder.get_embedding_batch(texts)
+        else:
+            vectors = [self._embedder.get_embedding(t) for t in texts]
         for rec, vec in zip(records, vectors, strict=True):
             rec["vector"] = vec
 

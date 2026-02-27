@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -398,3 +400,119 @@ class TestResolutionQueries:
         cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
         props = _json.loads(cur.fetchone()["properties"])
         assert props["status"] == "resolved"
+
+
+# --- Migration safety (Commit 4, Issue #4) ---
+
+
+class TestMigrationSafety:
+    """Migration error handling: ignore 'already exists', propagate real errors."""
+
+    def test_real_error_propagates(self, tmp_path: Path) -> None:
+        """OperationalError without 'already exists' propagates."""
+        import grippy.persistence as persistence_mod
+
+        # Inject a migration that triggers a real error (invalid SQL)
+        original_migrations = persistence_mod._MIGRATIONS
+        persistence_mod._MIGRATIONS = [
+            "ALTER TABLE nonexistent_table ADD COLUMN bad_col TEXT",
+        ]
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="no such table"):
+                GrippyStore(
+                    graph_db_path=tmp_path / "test.db",
+                    lance_dir=tmp_path / "lance",
+                    embedder=_FakeEmbedder(),
+                )
+        finally:
+            persistence_mod._MIGRATIONS = original_migrations
+
+    def test_already_exists_ignored(self, tmp_path: Path) -> None:
+        """First init creates column, second init silently ignores 'already exists'."""
+        store1 = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+        # Second init — migration should not raise
+        store2 = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance2",
+            embedder=_FakeEmbedder(),
+        )
+        assert store2 is not None
+
+
+# --- Batch embedding protocol (Commit 4, Issue #8) ---
+
+
+class _FakeBatchEmbedder:
+    """Embedder that supports both single and batch embedding."""
+
+    def get_embedding(self, text: str) -> list[float]:
+        import hashlib
+
+        h = hashlib.sha256(text.encode()).digest()
+        return [float(b) / 255.0 for b in h[:EMBED_DIM]]
+
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.get_embedding(t) for t in texts]
+
+
+class TestBatchEmbedding:
+    """GrippyStore uses batch embedding when available."""
+
+    def test_batch_embedder_used_when_available(self, tmp_path: Path) -> None:
+        """Embedder with get_embedding_batch is called once for all texts."""
+        embedder = _FakeBatchEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+
+        with patch.object(
+            embedder, "get_embedding_batch", wraps=embedder.get_embedding_batch
+        ) as mock_batch:
+            store.store_review(graph)
+            # Batch should be called once with all texts
+            mock_batch.assert_called_once()
+            texts_arg = mock_batch.call_args[0][0]
+            assert len(texts_arg) == len(graph.nodes)
+
+    def test_single_embedder_fallback(self, tmp_path: Path) -> None:
+        """Embedder without get_embedding_batch falls back to individual calls."""
+        embedder = _FakeEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+
+        with patch.object(embedder, "get_embedding", wraps=embedder.get_embedding) as mock_single:
+            store.store_review(graph)
+            # Single should be called N times (once per node)
+            assert mock_single.call_count == len(graph.nodes)
+
+    def test_batch_embedder_stores_correct_vectors(self, tmp_path: Path) -> None:
+        """Batch result vectors are correctly associated with their records."""
+        embedder = _FakeBatchEmbedder()
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=embedder,
+        )
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+
+        nodes = store.get_all_nodes()
+        assert len(nodes) > 0
+        # Each node should have a vector
+        for node in nodes:
+            assert "vector" in node
+            assert len(node["vector"]) == EMBED_DIM
