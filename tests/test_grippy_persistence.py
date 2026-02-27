@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -451,7 +451,7 @@ class TestMigrationSafety:
 
     def test_already_exists_ignored(self, tmp_path: Path) -> None:
         """First init creates column, second init silently ignores 'already exists'."""
-        store1 = GrippyStore(
+        GrippyStore(
             graph_db_path=tmp_path / "test.db",
             lance_dir=tmp_path / "lance",
             embedder=_FakeEmbedder(),

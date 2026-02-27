@@ -992,9 +992,7 @@ class TestMainPostReviewFailure:
         event_path.write_text(json.dumps(event))
         return event_path
 
-    def _setup_env(
-        self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path
-    ) -> None:
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path) -> None:
         monkeypatch.setenv("GITHUB_TOKEN", "test-token")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))

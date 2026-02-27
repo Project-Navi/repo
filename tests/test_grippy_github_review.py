@@ -588,10 +588,7 @@ class TestParseDiffLinesEdgeCases:
         """Diff with 'Binary files differ' should not crash or over-include."""
         from grippy.github_review import parse_diff_lines
 
-        diff = (
-            "diff --git a/img.png b/img.png\n"
-            "Binary files a/img.png and b/img.png differ\n"
-        )
+        diff = "diff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n"
         result = parse_diff_lines(diff)
         # Should have the file entry, but no addressable lines
         assert result.get("img.png", set()) == set()
@@ -751,10 +748,7 @@ class TestPostReview422Fallback:
         hunk_header = f"@@ -8,3 +8,{_REVIEW_BATCH_SIZE + 10} @@\n"
         diff = (
             "diff --git a/src/app.py b/src/app.py\n"
-            "--- a/src/app.py\n+++ b/src/app.py\n"
-            + hunk_header
-            + " line\n"
-            + diff_lines
+            "--- a/src/app.py\n+++ b/src/app.py\n" + hunk_header + " line\n" + diff_lines
         )
 
         post_review(
