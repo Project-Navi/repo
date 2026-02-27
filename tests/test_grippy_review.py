@@ -1043,6 +1043,10 @@ class TestMainOrchestration:
         # The structured field was overridden (not just the comment text)
         assert review.model == "gpt-5.2"
 
+        # The overridden value reached the serialization boundary
+        mock_to_graph.assert_called_once()
+        assert mock_to_graph.call_args[0][0].model == "gpt-5.2"
+
         # The posted comment should contain the configured model, not the hallucinated one
         posted_body = mock_post.call_args[0][3]
         assert "gpt-5.2" in posted_body
