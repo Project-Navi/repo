@@ -12,6 +12,7 @@ conditions:
   "workflows/tests.yml.j2": "spec.features.ci"
   "pre-commit-config.yaml.j2": "spec.features.pre_commit"
   "secrets-baseline.json.j2": "spec.features.pre_commit"
+  "license-header.txt.j2": "spec.license"
   "pyproject-tools.toml.j2": "!spec.recon.existing_tools.ruff"
 
 loops: {}
@@ -30,6 +31,8 @@ templates:
     dest: CLAUDE.md
   - src: DEBT.md.j2
     dest: DEBT.md
+  - src: license-header.txt.j2
+    dest: .license-header.txt
   - src: secrets-baseline.json.j2
     dest: .secrets.baseline
 
