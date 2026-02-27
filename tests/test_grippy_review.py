@@ -1010,6 +1010,42 @@ class TestMainOrchestration:
         mock_store_cls.return_value.store_review.assert_called_once_with(graph)
 
     @patch("grippy.review.post_comment")
+    @patch("grippy.review.GrippyStore")
+    @patch("grippy.review.review_to_graph")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_model_override_replaces_llm_self_report(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_to_graph: MagicMock,
+        mock_store_cls: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """review.model is overridden with configured model_id, not LLM self-report."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+        monkeypatch.setenv("GRIPPY_MODEL_ID", "gpt-5.2")
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        review = _make_review(model="hallucinated-gpt-4.1")
+        mock_run_review.return_value = review
+        mock_to_graph.return_value = MagicMock(nodes=[])
+
+        from grippy.review import main
+
+        main()
+
+        # The posted comment should contain the configured model, not the hallucinated one
+        posted_body = mock_post.call_args[0][3]
+        assert "gpt-5.2" in posted_body
+        assert "hallucinated-gpt-4.1" not in posted_body
+
+    @patch("grippy.review.post_comment")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
