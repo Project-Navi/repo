@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
-from github import Github
+from github import Github, GithubException
 
 from grippy.schema import Finding
 
@@ -71,9 +71,16 @@ def parse_diff_lines(diff_text: str) -> dict[str, set[int]]:
             continue
 
         # Context lines (space prefix): addressable on right side
-        if line.startswith(" ") or (not line.startswith("\\") and right_line > 0):
+        if line.startswith(" "):
             result[current_file].add(right_line)
             right_line += 1
+            continue
+
+        # "\ No newline at end of file" — skip, don't increment
+        if line.startswith("\\"):
+            continue
+
+        # Any other line (unexpected metadata) — skip
 
     return result
 
@@ -346,15 +353,25 @@ def post_review(
         off_diff = findings
         inline = []
 
-    # Post inline review comments (batched)
+    # Post inline review comments (batched, with 422 fallback)
+    failed_findings: list[Finding] = []
     if inline:
         comments = [build_review_comment(f) for f in inline]
         for i in range(0, len(comments), _REVIEW_BATCH_SIZE):
             batch = comments[i : i + _REVIEW_BATCH_SIZE]
-            pr.create_review(
-                event="COMMENT",
-                comments=batch,  # type: ignore[arg-type]
-            )
+            try:
+                pr.create_review(
+                    event="COMMENT",
+                    comments=batch,  # type: ignore[arg-type]
+                )
+            except GithubException as exc:
+                if exc.status == 422:
+                    # Move this batch's findings to off-diff
+                    failed_findings.extend(inline[i : i + _REVIEW_BATCH_SIZE])
+                else:
+                    raise
+    if failed_findings:
+        off_diff.extend(failed_findings)
 
     # Build summary comment
     summary = format_summary_comment(

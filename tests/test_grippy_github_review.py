@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from grippy.schema import Finding
 
 # --- Helpers ---
@@ -552,3 +554,211 @@ class TestResolveThreads:
             thread_ids=["PRRT_bad"],
         )
         assert count == 0
+
+
+# --- parse_diff_lines edge cases (Commit 1, Issue #1) ---
+
+
+class TestParseDiffLinesEdgeCases:
+    """Edge cases for parse_diff_lines context line handling."""
+
+    def test_no_newline_marker_not_in_result(self) -> None:
+        """'\\No newline at end of file' marker must NOT appear in result set."""
+        from grippy.github_review import parse_diff_lines
+
+        diff = (
+            "diff --git a/f.py b/f.py\n"
+            "--- a/f.py\n"
+            "+++ b/f.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            " line1\n"
+            "-old_line2\n"
+            "+new_line2\n"
+            "\\ No newline at end of file\n"
+        )
+        result = parse_diff_lines(diff)
+        assert "f.py" in result
+        # line1 is at right_line=1 (context), new_line2 at right_line=2 (added)
+        assert 1 in result["f.py"]
+        assert 2 in result["f.py"]
+        # The marker line should NOT have incremented the counter or added a line
+        assert len(result["f.py"]) == 2
+
+    def test_binary_metadata_no_crash(self) -> None:
+        """Diff with 'Binary files differ' should not crash or over-include."""
+        from grippy.github_review import parse_diff_lines
+
+        diff = (
+            "diff --git a/img.png b/img.png\n"
+            "Binary files a/img.png and b/img.png differ\n"
+        )
+        result = parse_diff_lines(diff)
+        # Should have the file entry, but no addressable lines
+        assert result.get("img.png", set()) == set()
+
+    def test_only_space_prefix_is_context(self) -> None:
+        """Only lines starting with ' ' are context — random chars are ignored."""
+        from grippy.github_review import parse_diff_lines
+
+        diff = (
+            "diff --git a/f.py b/f.py\n"
+            "--- a/f.py\n"
+            "+++ b/f.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " context_line\n"
+            "+added_line\n"
+            "~unexpected_tilde_line\n"
+            " more_context\n"
+        )
+        result = parse_diff_lines(diff)
+        # context_line=1, added_line=2, tilde ignored, more_context=3
+        assert 1 in result["f.py"]
+        assert 2 in result["f.py"]
+        assert 3 in result["f.py"]
+        assert len(result["f.py"]) == 3
+
+
+# --- post_review 422 fallback (Commit 1, Issue #5) ---
+
+
+class TestPostReview422Fallback:
+    """post_review handles GitHub 422 errors by moving findings to summary."""
+
+    @patch("grippy.github_review.Github")
+    def test_422_fallback_to_summary(self, mock_github_cls: MagicMock) -> None:
+        """422 on create_review moves findings to off-diff in summary, no crash."""
+        from github import GithubException
+
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+        mock_pr.create_review.side_effect = GithubException(
+            422, {"message": "Validation Failed"}, None
+        )
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new_line\n line2\n"
+        )
+        findings = [_make_finding(file="src/app.py", line_start=9)]
+
+        # Should NOT raise
+        resolution = post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=findings,
+            prior_findings=[],
+            head_sha="abc123",
+            diff=diff,
+            score=80,
+            verdict="PASS",
+        )
+
+        # Summary should include the finding as off-diff
+        mock_pr.create_issue_comment.assert_called_once()
+        body = mock_pr.create_issue_comment.call_args[0][0]
+        assert "Off-diff findings" in body
+        assert resolution is not None
+
+    @patch("grippy.github_review.Github")
+    def test_422_partial_batch(self, mock_github_cls: MagicMock) -> None:
+        """First batch succeeds, second raises 422 — first batch posted."""
+        from github import GithubException
+
+        from grippy.github_review import _REVIEW_BATCH_SIZE, post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        call_count = 0
+
+        def _side_effect(**kwargs: object) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise GithubException(422, {"message": "Validation Failed"}, None)
+
+        mock_pr.create_review.side_effect = _side_effect
+
+        # Create enough findings to span 2+ batches
+        diff_lines = ""
+        findings = []
+        for i in range(_REVIEW_BATCH_SIZE + 5):
+            line_num = 10 + i
+            diff_lines += f"+line{i}\n"
+            findings.append(
+                _make_finding(
+                    file="src/app.py",
+                    line_start=line_num,
+                    title=f"Finding {i}",
+                )
+            )
+
+        hunk_header = f"@@ -8,3 +8,{_REVIEW_BATCH_SIZE + 10} @@\n"
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            + hunk_header
+            + " line\n"
+            + diff_lines
+        )
+
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=findings,
+            prior_findings=[],
+            head_sha="abc123",
+            diff=diff,
+            score=70,
+            verdict="PASS",
+        )
+
+        # First batch succeeded, second failed
+        assert mock_pr.create_review.call_count == 2
+
+    @patch("grippy.github_review.Github")
+    def test_non_422_propagates(self, mock_github_cls: MagicMock) -> None:
+        """GithubException(500) is re-raised, not swallowed."""
+        from github import GithubException
+
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+        mock_pr.create_review.side_effect = GithubException(
+            500, {"message": "Internal Server Error"}, None
+        )
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new_line\n line2\n"
+        )
+        findings = [_make_finding(file="src/app.py", line_start=9)]
+
+        with pytest.raises(GithubException):
+            post_review(
+                token="test-token",
+                repo="org/repo",
+                pr_number=1,
+                findings=findings,
+                prior_findings=[],
+                head_sha="abc123",
+                diff=diff,
+                score=80,
+                verdict="PASS",
+            )
