@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from grippy.schema import GrippyReview
+from grippy.schema import Finding, GrippyReview
 
 
 class EdgeType(StrEnum):
@@ -25,6 +25,8 @@ class EdgeType(StrEnum):
     EXTRACTED_FROM = "EXTRACTED_FROM"
     TENDENCY = "TENDENCY"
     REVIEWED_BY = "REVIEWED_BY"
+    RESOLVES = "RESOLVES"
+    PERSISTS_AS = "PERSISTS_AS"
 
 
 class NodeType(StrEnum):
@@ -186,6 +188,8 @@ def review_to_graph(review: GrippyReview) -> ReviewGraph:
                     "line_start": finding.line_start,
                     "line_end": finding.line_end,
                     "evidence": finding.evidence,
+                    "fingerprint": finding.fingerprint,
+                    "status": "open",
                 },
                 edges=finding_edges,
                 created_at=review.timestamp,
@@ -197,4 +201,33 @@ def review_to_graph(review: GrippyReview) -> ReviewGraph:
         review_id=review_nid,
         nodes=nodes,
         timestamp=review.timestamp,
+    )
+
+
+class FindingLifecycle(BaseModel):
+    """Cross-round finding comparison result."""
+
+    new: list[Finding]
+    persists: list[Finding]
+    resolved: list[Finding]
+
+
+def cross_reference_findings(
+    current: list[Finding],
+    previous: list[Finding],
+) -> FindingLifecycle:
+    """Compare current vs previous findings by fingerprint.
+
+    Returns a FindingLifecycle with:
+    - new: findings in current but not previous
+    - persists: findings in both (matched by fingerprint)
+    - resolved: findings in previous but not current
+    """
+    prev_fps = {f.fingerprint for f in previous}
+    curr_fps = {f.fingerprint for f in current}
+
+    return FindingLifecycle(
+        new=[f for f in current if f.fingerprint not in prev_fps],
+        persists=[f for f in current if f.fingerprint in prev_fps],
+        resolved=[f for f in previous if f.fingerprint not in curr_fps],
     )

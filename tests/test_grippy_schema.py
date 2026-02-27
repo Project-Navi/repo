@@ -283,3 +283,53 @@ class TestGrippyReviewRoundTrip:
         review = GrippyReview(**data)
         assert len(review.escalations) == 1
         assert review.escalations[0].blocking is True
+
+
+# --- Fingerprint tests ---
+
+
+class TestFindingFingerprint:
+    """Finding.fingerprint is a deterministic hash for cross-round matching."""
+
+    def test_fingerprint_is_deterministic(self) -> None:
+        """Same file + category + title -> same fingerprint."""
+        f1 = Finding(**_minimal_finding(
+            id="F-001", file="src/auth.py", category="security",
+            title="SQL injection risk",
+        ))
+        f2 = Finding(**_minimal_finding(
+            id="F-002", severity="MEDIUM", confidence=70,
+            file="src/auth.py", category="security",
+            title="SQL injection risk", description="different",
+        ))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_line_changes(self) -> None:
+        """Line numbers don't affect fingerprint."""
+        f1 = Finding(**_minimal_finding(line_start=10, line_end=20))
+        f2 = Finding(**_minimal_finding(line_start=100, line_end=110))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_differs_for_different_files(self) -> None:
+        """Different file -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(file="a.py"))
+        f2 = Finding(**_minimal_finding(file="b.py"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_differs_for_different_categories(self) -> None:
+        """Different category -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(category="security"))
+        f2 = Finding(**_minimal_finding(category="logic"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_differs_for_different_titles(self) -> None:
+        """Different title -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(title="Title A"))
+        f2 = Finding(**_minimal_finding(title="Title B"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_is_12_char_hex(self) -> None:
+        """Fingerprint is a 12-character hex string."""
+        f = Finding(**_minimal_finding())
+        assert len(f.fingerprint) == 12
+        assert all(c in "0123456789abcdef" for c in f.fingerprint)

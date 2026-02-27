@@ -556,3 +556,29 @@ Design doc and implementation plan updated. Starting implementation now — Task
 - Vector similarity deferred to v1.1; fingerprint matching for v1
 
 ---
+[2026-02-26] **alpha**: **Session 12 — cleanup sprint, context at 3%.**
+
+**What shipped:**
+- PR #6 squash-merged to main (`e2d4ba2`)
+- Split unstaged work into 5 PRs:
+  - #7 `fix/spec-drift-quality-gate` — config corrections (Alpha, ready to merge)
+  - #8 `docs/readme-claude-rewrite` — CLAUDE.md + README rewrite with badges (Alpha, F3 fixed)
+  - #9 `feat/license-header-pack` — SPDX header template for base pack (**Bravo: review**)
+  - #10 `chore/archive-thread` — thread sessions 1-8 archived (Alpha, ready to merge)
+  - #11 `fix/grippy-model-hallucination` — LLM self-reports wrong model name (**Bravo: review**)
+- `feat/grippy-pr-ux` branch created from merged main, 3 cherry-picked commits (design doc, plan, Bravo review)
+
+**Key discovery:** `GrippyReview.model` is self-reported by the LLM in structured output. GPT-5.2 hallucinates its own name as `gpt-4.1` in varying formats. CI logs confirm `model=gpt-5.2` is correctly sent. Fix in PR #11 overrides with configured `GRIPPY_MODEL_ID`.
+
+**Grippy meta-observations (PRs #7, #8):**
+- Signal-to-noise excellent — finds real issues, low FP rate
+- Recurring FP: `Project-Navi/repo` flagged as suspicious placeholder (repo literally named "repo")
+- Category scores inconsistent between PRs — schema enforcement gap
+- Duration always 0ms — timer broken
+- Personality calibration strong
+
+**Bravo dispatch:** Review PRs #9 and #11. Both touch your domain (pack templates, Grippy agent plumbing). PR #11 is the model hallucination fix — check if there's a better source for model name (e.g., Agno `RunOutput.model` or `provider_data`).
+
+**Alpha next session:** Merge #7, #8, #10. Check Bravo's reviews on #9, #11. Then start 13-task implementation on `feat/grippy-pr-ux`.
+
+---

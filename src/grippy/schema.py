@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from enum import StrEnum
+from functools import cached_property
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -91,6 +93,8 @@ class ReviewScope(BaseModel):
 
 
 class Finding(BaseModel):
+    model_config = {"frozen": False}
+
     id: str = Field(description="F-001 through F-999")
     severity: Severity
     confidence: int = Field(ge=0, le=100)
@@ -104,6 +108,16 @@ class Finding(BaseModel):
     governance_rule_id: str | None = None
     evidence: str
     grippy_note: str = Field(max_length=280)
+
+    @cached_property
+    def fingerprint(self) -> str:
+        """Deterministic 12-char hex hash for cross-round finding matching.
+
+        Uses file + category + title — stable across line number shifts,
+        severity re-ratings, and description rewrites.
+        """
+        key = f"{self.file}:{self.category}:{self.title}"
+        return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
 class Escalation(BaseModel):

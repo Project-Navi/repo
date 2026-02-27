@@ -8,6 +8,7 @@ from grippy.graph import (
     Node,
     NodeType,
     ReviewGraph,
+    cross_reference_findings,
     node_id,
     review_to_graph,
 )
@@ -383,3 +384,66 @@ class TestReviewToGraph:
         ids1 = sorted(n.id for n in graph1.nodes)
         ids2 = sorted(n.id for n in graph2.nodes)
         assert ids1 == ids2
+
+    def test_finding_node_includes_fingerprint(self) -> None:
+        """Finding node properties include the deterministic fingerprint."""
+        review = _make_review(findings=[_make_finding()])
+        graph = review_to_graph(review)
+        finding_node = next(n for n in graph.nodes if n.type == NodeType.FINDING)
+        assert "fingerprint" in finding_node.properties
+        assert len(finding_node.properties["fingerprint"]) == 12
+
+
+# --- Edge type additions ---
+
+
+class TestEdgeTypeAdditions:
+    """RESOLVES and PERSISTS_AS edges for finding lifecycle tracking."""
+
+    def test_resolves_edge_exists(self) -> None:
+        assert EdgeType.RESOLVES == "RESOLVES"
+
+    def test_persists_as_edge_exists(self) -> None:
+        assert EdgeType.PERSISTS_AS == "PERSISTS_AS"
+
+
+# --- cross_reference_findings ---
+
+
+class TestCrossReferenceFindings:
+    """cross_reference_findings compares current vs previous findings by fingerprint."""
+
+    def test_new_finding_no_previous(self) -> None:
+        """All findings are NEW when there's no previous round."""
+        current = [_make_finding(file="a.py", title="Bug A")]
+        result = cross_reference_findings(current, [])
+        assert len(result.new) == 1
+        assert len(result.persists) == 0
+        assert len(result.resolved) == 0
+
+    def test_persisting_finding(self) -> None:
+        """Finding with same fingerprint in both rounds is PERSISTS."""
+        f1 = _make_finding(file="a.py", title="Bug A", line_start=10)
+        f2 = _make_finding(file="a.py", title="Bug A", line_start=50)
+        result = cross_reference_findings([f2], [f1])
+        assert len(result.persists) == 1
+        assert len(result.new) == 0
+        assert len(result.resolved) == 0
+
+    def test_resolved_finding(self) -> None:
+        """Finding in previous but not current is RESOLVED."""
+        prev = _make_finding(file="a.py", title="Bug A")
+        current = _make_finding(file="b.py", title="Bug B")
+        result = cross_reference_findings([current], [prev])
+        assert len(result.resolved) == 1
+        assert result.resolved[0].fingerprint == prev.fingerprint
+
+    def test_mixed_lifecycle(self) -> None:
+        """Mix of new, persisting, and resolved findings."""
+        shared = _make_finding(file="shared.py", title="Shared Bug")
+        old_only = _make_finding(file="old.py", title="Old Bug")
+        new_only = _make_finding(file="new.py", title="New Bug")
+        result = cross_reference_findings([shared, new_only], [shared, old_only])
+        assert len(result.new) == 1
+        assert len(result.persists) == 1
+        assert len(result.resolved) == 1

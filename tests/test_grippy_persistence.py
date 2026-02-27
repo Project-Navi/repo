@@ -30,16 +30,14 @@ from grippy.schema import (
 EMBED_DIM = 8
 
 
-def _fake_embed(texts: list[str]) -> list[list[float]]:
-    """Deterministic fake embeddings — hash-based, fixed dimension."""
-    import hashlib
+class _FakeEmbedder:
+    """Deterministic fake embedder — hash-based, fixed dimension."""
 
-    results = []
-    for text in texts:
+    def get_embedding(self, text: str) -> list[float]:
+        import hashlib
+
         h = hashlib.sha256(text.encode()).digest()
-        vec = [float(b) / 255.0 for b in h[:EMBED_DIM]]
-        results.append(vec)
-    return results
+        return [float(b) / 255.0 for b in h[:EMBED_DIM]]
 
 
 def _make_finding(
@@ -132,7 +130,7 @@ def store(tmp_path: Path) -> GrippyStore:
     return GrippyStore(
         graph_db_path=tmp_path / "grippy-graph.db",
         lance_dir=tmp_path / "lance",
-        embed_fn=_fake_embed,
+        embedder=_FakeEmbedder(),
     )
 
 
@@ -146,7 +144,7 @@ class TestGrippyStoreInit:
         GrippyStore(
             graph_db_path=db_path,
             lance_dir=tmp_path / "lance",
-            embed_fn=_fake_embed,
+            embedder=_FakeEmbedder(),
         )
         assert db_path.exists()
 
@@ -156,7 +154,7 @@ class TestGrippyStoreInit:
         GrippyStore(
             graph_db_path=tmp_path / "grippy-graph.db",
             lance_dir=lance_dir,
-            embed_fn=_fake_embed,
+            embedder=_FakeEmbedder(),
         )
         assert lance_dir.exists()
 
@@ -326,3 +324,41 @@ class TestVectorSearch:
         store.store_review(review_to_graph(review))
         results = store.search_nodes("bug", k=3)
         assert len(results) <= 3
+
+
+# --- Resolution queries ---
+
+
+class TestResolutionQueries:
+    """GrippyStore resolution matching for finding lifecycle."""
+
+    def test_get_prior_findings_returns_open_findings(self, store: GrippyStore) -> None:
+        """get_prior_findings returns findings with status='open'."""
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+        findings = store.get_prior_findings(review_id=graph.review_id)
+        assert len(findings) > 0
+        for f in findings:
+            assert f["status"] == "open"
+
+    def test_get_prior_findings_empty_when_no_reviews(self, store: GrippyStore) -> None:
+        """No stored reviews -> empty list."""
+        findings = store.get_prior_findings(review_id="nonexistent")
+        assert findings == []
+
+    def test_update_finding_status(self, store: GrippyStore) -> None:
+        """update_finding_status changes a finding's status in node_meta."""
+        import json as _json
+
+        review = _make_review()
+        graph = review_to_graph(review)
+        store.store_review(graph)
+        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
+        assert len(finding_nodes) > 0
+        nid = finding_nodes[0].id
+        store.update_finding_status(nid, "resolved")
+        cur = store._conn.cursor()
+        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
+        props = _json.loads(cur.fetchone()["properties"])
+        assert props["status"] == "resolved"
