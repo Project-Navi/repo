@@ -103,7 +103,8 @@ def create_reviewer(
             or inferred from OPENAI_API_KEY presence. Invalid values raise
             ValueError.
         prompts_dir: Directory containing Grippy's 21 markdown prompt files.
-        mode: Review mode — pr_review, security_audit, governance_check, surprise_audit.
+        mode: Review mode — pr_review, security_audit, governance_check,
+            surprise_audit, cli, github_app.
         db_path: Path to SQLite file for session persistence. None = stateless.
         session_id: Session ID for review continuity across runs.
         num_history_runs: Number of prior runs to include in context (requires db).

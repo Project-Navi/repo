@@ -8,7 +8,7 @@ from pathlib import Path
 # IDENTITY:      CONSTITUTION + PERSONA (Agno description)
 # INSTRUCTIONS:  MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX (Agno instructions)
 
-IDENTITY_FILES = ["CONSTITUTION.md", "PERSONA.md"]
+IDENTITY_FILES: list[str] = ["CONSTITUTION.md", "PERSONA.md"]
 
 # Mode-specific prefix: system-core + mode prompt
 MODE_CHAINS: dict[str, list[str]] = {
@@ -37,7 +37,7 @@ CHAIN_SUFFIX: list[str] = ["scoring-rubric.md", "output-schema.md"]
 
 
 def load_prompt_file(prompts_dir: Path, filename: str) -> str:
-    """Load a single prompt file, stripping the YAML front-matter header."""
+    """Load a single prompt file and return its content."""
     path = prompts_dir / filename
     if not path.exists():
         msg = f"Prompt file not found: {path}"

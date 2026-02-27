@@ -138,8 +138,12 @@ class TestLoadInstructions:
 class TestModeChains:
     def test_all_modes_exist(self) -> None:
         expected = {
-            "pr_review", "security_audit", "governance_check",
-            "surprise_audit", "cli", "github_app",
+            "pr_review",
+            "security_audit",
+            "governance_check",
+            "surprise_audit",
+            "cli",
+            "github_app",
         }
         assert set(MODE_CHAINS.keys()) == expected
 
