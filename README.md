@@ -1,10 +1,19 @@
-# repo
+# navi-bootstrap
 
-A repo called `repo` that bootstraps repos. The CLI is `nboot`. The irony is the feature.
-
-Spec-driven rendering engine and template packs for bootstrapping projects to production-grade posture. CI, security scanning, code review, release pipelines, quality gates — defined once as template packs, applied to any project with a single command.
-
+[![Tests](https://github.com/Project-Navi/repo/actions/workflows/tests.yml/badge.svg)](https://github.com/Project-Navi/repo/actions/workflows/tests.yml)
+[![Grippy Review](https://github.com/Project-Navi/repo/actions/workflows/grippy-review.yml/badge.svg)](https://github.com/Project-Navi/repo/actions/workflows/grippy-review.yml)
+[![CodeQL](https://github.com/Project-Navi/repo/actions/workflows/codeql.yml/badge.svg)](https://github.com/Project-Navi/repo/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://github.com/Project-Navi/repo/actions/workflows/scorecard.yml/badge.svg)](https://github.com/Project-Navi/repo/actions/workflows/scorecard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+
+Two engines in one repo. **nboot** bootstraps projects to production-grade posture with spec-driven template packs. **Grippy** reviews your code with a knowledge graph that remembers what it already told you.
+
+---
+
+## nboot — Bootstrap Engine
+
+Spec-driven rendering engine and template packs. CI, security scanning, code review, release pipelines, quality gates — defined once as template packs, applied to any project with a single command.
 
 ```bash
 # Generate a spec by inspecting your project
@@ -20,25 +29,9 @@ nboot apply --spec nboot-spec.json --pack ./packs/base --target ./my-project
 nboot render --spec nboot-spec.json --pack ./packs/base --out ./my-project
 ```
 
-## Quick Start
-
-```bash
-# Install
-uv sync
-
-# Inspect your project and generate a spec
-nboot init --target /path/to/project
-
-# Preview changes before applying
-nboot diff --spec nboot-spec.json --pack ./packs/base --target /path/to/project
-
-# Apply the base pack to your project
-nboot apply --spec nboot-spec.json --pack ./packs/base --target /path/to/project
-```
-
 The spec describes your project. The pack describes what to generate. The engine connects them deterministically: same spec + same pack = same output, every time.
 
-## Packs
+### Packs
 
 Seven template packs, layered with explicit dependencies:
 
@@ -66,61 +59,7 @@ All elective packs depend on `base`. The agent sequences them; the engine render
 
 Packs never modify source code, never make governance decisions, and never fix pre-existing violations — they document them.
 
-## Grippy
-
-Grippy is navi-bootstrap's AI code reviewer — a prompt-only framework (21 markdown files, zero code) that runs via [Agno](https://github.com/agno-agi/agno). Supports OpenAI models and local LLMs through any OpenAI-compatible endpoint.
-
-- **Structured output.** Every review produces Pydantic-validated JSON: findings with severity, confidence, evidence, and suggestions. 14 nested models, enum-constrained fields, no freeform text to parse.
-- **Dual deployment.** OpenAI (GPT-5.2) for CI on GitHub-hosted runners, or local models (Devstral, Qwen, etc.) via LM Studio/Ollama for air-gapped environments.
-- **Validated.** Tested against both GPT-5.2 and Devstral Q4 (24b) with the full 7-file prompt chain. Both produce schema-compliant structured JSON on first attempt.
-
-### OpenAI (default)
-
-```python
-from grippy.agent import create_reviewer, format_pr_context
-
-# Reads OPENAI_API_KEY from environment
-reviewer = create_reviewer(model_id="gpt-5.2")
-
-result = reviewer.run(format_pr_context(
-    title="feat: add user auth",
-    author="dev",
-    branch="feature/auth -> main",
-    diff=diff_content,
-))
-```
-
-### Local LLM
-
-```python
-reviewer = create_reviewer(
-    model_id="devstral-small-2-24b-instruct-2512",
-    base_url="http://localhost:1234/v1",
-    api_key="lm-studio",  # LM Studio accepts any non-empty string
-)
-```
-
-### CI Configuration
-
-| Variable | Description | Default |
-|---|---|---|
-| `GRIPPY_TRANSPORT` | `"openai"` or `"local"` — explicit model routing | Inferred from `OPENAI_API_KEY` |
-| `OPENAI_API_KEY` | OpenAI API key (required for `transport=openai`) | — |
-| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints (embedding auth fallback) | — |
-| `GRIPPY_BASE_URL` | OpenAI-compatible API endpoint | `http://localhost:1234/v1` |
-| `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
-| `GRIPPY_EMBEDDING_MODEL` | Embedding model for knowledge graph | `text-embedding-qwen3-embedding-4b` |
-| `GRIPPY_DATA_DIR` | Persistent directory for graph DB + LanceDB | `./grippy-data` |
-| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = no timeout) | `300` |
-
-| Deployment | Key Variables |
-|---|---|
-| **OpenAI** (GitHub-hosted) | `GRIPPY_TRANSPORT=openai`, `OPENAI_API_KEY`, `GRIPPY_MODEL_ID=gpt-5.2` |
-| **Local** (self-hosted runner) | `GRIPPY_BASE_URL=http://<host>:1234/v1`, `GRIPPY_MODEL_ID=<model>`, `GRIPPY_EMBEDDING_MODEL=<embed-model>` |
-
-The architecture is identical in both modes — only the model transport changes. Defaults are local-first; CI sets OpenAI values explicitly.
-
-## Architecture
+### Architecture
 
 Six-stage pipeline. Stateless and deterministic through stage 3.
 
@@ -153,16 +92,83 @@ src/navi_bootstrap/
 └── diff.py       # Drift detection (render-to-memory + unified diff)
 ```
 
+---
+
+## Grippy — AI Code Reviewer
+
+Grippy is an Agno-based AI code review agent with structured output, knowledge graph persistence, and GitHub PR integration. It runs on every push to a PR, posts findings as inline review comments, tracks finding lifecycle across rounds, and auto-resolves threads when issues are fixed.
+
+- **Structured output.** Every review produces Pydantic-validated JSON: findings with severity, confidence, evidence, and suggestions. 14 nested models, enum-constrained fields, no freeform text to parse.
+- **Knowledge graph.** Findings, files, categories, and reviews stored as typed nodes with directed edges in SQLite + LanceDB. Finding fingerprints enable cross-round resolution tracking.
+- **Dual deployment.** OpenAI (GPT-5.2) for CI on GitHub-hosted runners, or local models (Devstral, Qwen, etc.) via LM Studio/Ollama for air-gapped environments.
+- **PR integration.** Inline review comments on diff lines, summary dashboard with score and delta, fork PR fallback to issue comments, thread auto-resolution via GraphQL.
+
+```
+src/grippy/
+├── agent.py        # create_reviewer() — Agno agent with transport selection
+├── schema.py       # GrippyReview — 14 nested Pydantic models
+├── graph.py        # Node, Edge, ReviewGraph — typed knowledge graph
+├── persistence.py  # GrippyStore — SQLite edges + LanceDB vectors
+├── review.py       # CI entry point — orchestrates review, posting, storage
+├── retry.py        # run_review() — validation retry with ReviewParseError
+├── prompts.py      # Prompt assembly from prompts_data/ markdown files
+└── prompts_data/   # 22 files — persona, constitution, review modes, tone
+```
+
+### Usage
+
+```python
+from grippy.agent import create_reviewer, format_pr_context
+
+# OpenAI (reads OPENAI_API_KEY from environment)
+reviewer = create_reviewer(model_id="gpt-5.2")
+
+# Local LLM (LM Studio, Ollama, or any OpenAI-compatible endpoint)
+reviewer = create_reviewer(
+    model_id="devstral-small-2-24b-instruct-2512",
+    base_url="http://localhost:1234/v1",
+    api_key="lm-studio",
+)
+
+result = reviewer.run(format_pr_context(
+    title="feat: add user auth",
+    author="dev",
+    branch="feature/auth -> main",
+    diff=diff_content,
+))
+```
+
+### CI Configuration
+
+| Variable | Description | Default |
+|---|---|---|
+| `GRIPPY_TRANSPORT` | `"openai"` or `"local"` — explicit model routing | Inferred from `OPENAI_API_KEY` |
+| `OPENAI_API_KEY` | OpenAI API key (required for `transport=openai`) | — |
+| `GRIPPY_BASE_URL` | OpenAI-compatible API endpoint | `http://localhost:1234/v1` |
+| `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
+| `GRIPPY_EMBEDDING_MODEL` | Embedding model for knowledge graph | `text-embedding-qwen3-embedding-4b` |
+| `GRIPPY_DATA_DIR` | Persistent directory for graph DB + LanceDB | `./grippy-data` |
+| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = no timeout) | `300` |
+
+| Deployment | Key Variables |
+|---|---|
+| **OpenAI** (GitHub-hosted) | `GRIPPY_TRANSPORT=openai`, `OPENAI_API_KEY`, `GRIPPY_MODEL_ID=gpt-5.2` |
+| **Local** (self-hosted runner) | `GRIPPY_BASE_URL=http://<host>:1234/v1`, `GRIPPY_MODEL_ID=<model>`, `GRIPPY_EMBEDDING_MODEL=<embed-model>` |
+
+The architecture is identical in both modes — only the model transport changes. Defaults are local-first; CI sets OpenAI values explicitly.
+
+---
+
 ## Development
 
 ```bash
-uv sync                                          # Install dependencies
-uv run pytest tests/ -v                          # Run tests
-uv run ruff check src/navi_bootstrap/ tests/     # Lint
-uv run ruff format src/navi_bootstrap/ tests/    # Format
-uv run mypy src/navi_bootstrap/                  # Type check
-uv run bandit -r src/navi_bootstrap -ll          # Security scan
-pre-commit run --all-files                       # All hooks
+uv sync                                                             # Install dependencies
+uv run pytest tests/ -v                                             # Run all tests (~490)
+uv run ruff check src/navi_bootstrap/ src/grippy/ tests/            # Lint
+uv run ruff format src/navi_bootstrap/ src/grippy/ tests/           # Format
+uv run mypy src/navi_bootstrap/ src/grippy/                         # Type check
+uv run bandit -r src/navi_bootstrap -ll                             # Security scan
+pre-commit run --all-files                                          # All hooks
 ```
 
 Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
