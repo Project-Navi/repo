@@ -68,7 +68,7 @@ uv run ruff format src/navi_bootstrap/ src/grippy/ tests/
 # Type check (both packages)
 uv run mypy src/navi_bootstrap/ src/grippy/
 
-# Security scan (navi_bootstrap only — grippy excluded)
+# Security scan (navi_bootstrap only — grippy covered by CodeQL; bandit FPs on parameterized SQL)
 uv run bandit -r src/navi_bootstrap -ll
 
 # Run all quality checks
