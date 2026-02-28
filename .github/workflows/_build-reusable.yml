@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Install release tools
+        run: uv pip install cyclonedx-bom pip-licenses
+
       - name: Run test suite
         run: uv run pytest tests/ -x -q
 
@@ -76,6 +79,9 @@ jobs:
             echo "Release ${TAG_NAME}" > release-notes.md
           fi
 
+      - name: Build package
+        run: uv build
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -84,13 +90,11 @@ jobs:
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --notes-file release-notes.md \
+            dist/* \
             sbom.cdx.json \
             sbom.spdx.json \
             licenses.csv \
             licenses.txt
-
-      - name: Build package
-        run: uv build
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2  # v2.2.3
