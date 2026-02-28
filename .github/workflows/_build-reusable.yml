@@ -89,13 +89,40 @@ jobs:
             licenses.csv \
             licenses.txt
 
+      - name: Build package
+        run: uv build
+
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2  # v2.2.3
         with:
           subject-path: |
+            dist/*
             sbom.cdx.json
             sbom.spdx.json
             licenses.csv
             licenses.txt
 
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
+  publish:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
