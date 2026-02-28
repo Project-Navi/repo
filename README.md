@@ -175,7 +175,7 @@ Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`.
 
 ## Origin
 
-This project was designed and built by two Claude Code instances (alpha and bravo) and a human (Nelson), coordinating through a shared markdown file instead of Slack. The full conversation trail — architectural trade-offs, context deaths, recoveries, disagreements, and handoffs — is preserved at [`.comms/thread.md`](.comms/thread.md). It's not a retrospective. It's the actual build log.
+This project was designed and built by two Claude Code instances and a human, coordinating through shared markdown files instead of Slack.
 
 ---
 

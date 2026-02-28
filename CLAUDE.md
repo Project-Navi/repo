@@ -21,31 +21,11 @@ This file provides guidance to Claude Code when working with code in this reposi
 src/
   navi_bootstrap/   # 10 modules — engine, CLI, spec, manifest, resolve, validate, diff, hooks, init, sanitize
   grippy/           # 10 modules — agent, schema, graph, persistence, review, retry, prompts, embedder, github_review
-    prompts_data/   # 22 markdown files — persona, constitution, review modes, tone calibration
+    prompts_data/   # prompt markdown files — persona, constitution, review modes, tone calibration
 packs/              # 7 template packs — base, code-hygiene, github-templates, quality-gates, release-pipeline, review-system, security-scanning
-tests/              # 32+ test files including adversarial/ suite
-docs/               # Boot prompts, design docs, implementation plans
-.comms/             # Multi-agent communication thread (append-only)
+tests/              # test files including adversarial/ suite
 .github/workflows/  # CI: tests, Grippy review, CodeQL, scorecard, release
 ```
-
-## Grippy Architecture
-
-Grippy is an AI code review agent built on the Agno framework. Key components:
-
-- **`agent.py`** — `create_reviewer()` with transport selection (`openai` or `local`), Agno agent orchestration
-- **`schema.py`** — `GrippyReview` (14 nested Pydantic models): findings, score, verdict, personality
-- **`graph.py`** — Knowledge graph: `Node`, `Edge`, `ReviewGraph`, `review_to_graph()` with typed edge/node enums
-- **`persistence.py`** — `GrippyStore`: SQLite for edges/metadata + LanceDB for vector embeddings
-- **`review.py`** — CI entry point: `main()` orchestrates review, comment posting, graph storage
-- **`retry.py`** — `run_review()` with validation retry and `ReviewParseError`
-- **`prompts.py`** — System/user prompt assembly from `prompts_data/` markdown files
-
-**Transport modes:** `openai` (GitHub-hosted CI, uses `OPENAI_API_KEY`) or `local` (LM Studio over Tailscale). Resolved via `GRIPPY_TRANSPORT` env var or inferred from available API keys.
-
-**Storage:** Raw `lancedb.connect()` for vectors (we own the schema), `sqlite3` for graph edges and node metadata. Agno `Knowledge` class deliberately not used (document-oriented RAG, doesn't fit structured node storage).
-
-**Config:** `.grippy.yaml` at repo root — review modes, score thresholds, personality triggers.
 
 ## Development Commands
 
@@ -53,7 +33,7 @@ Grippy is an AI code review agent built on the Agno framework. Key components:
 # Install dependencies
 uv sync
 
-# Run all tests (~490)
+# Run all tests
 uv run pytest tests/ -v
 
 # Run tests with coverage (both packages)
@@ -68,7 +48,7 @@ uv run ruff format src/navi_bootstrap/ src/grippy/ tests/
 # Type check (both packages)
 uv run mypy src/navi_bootstrap/ src/grippy/
 
-# Security scan (navi_bootstrap only — grippy covered by CodeQL; bandit FPs on parameterized SQL)
+# Security scan (navi_bootstrap only — grippy covered by CodeQL)
 uv run bandit -r src/navi_bootstrap -ll
 
 # Run all quality checks
@@ -91,25 +71,10 @@ pre-commit run --all-files
 ## CI Pipeline
 
 - **tests.yml** — pytest, ruff, mypy on every PR
-- **grippy-review.yml** — Grippy AI code review on every PR (OpenAI on GitHub-hosted runners)
+- **grippy-review.yml** — Grippy AI code review on every PR
 - **codeql.yml** — GitHub CodeQL security scanning
 - **scorecard.yml** — OSSF scorecard
 - **Branch protection:** `main` requires PRs + passing Grippy Code Review check
-
-## Collaboration Model
-
-This repo uses a multi-agent development model:
-
-- **Alpha** — engine architect, meta-scribe, owns action packaging + deployment
-- **Bravo** — implementation lead, owns Grippy agent evolution
-- **Nelson** — human, project owner
-
-### Communication
-
-- **Thread:** `.comms/thread.md` — append only, never edit prior messages. Convention: `[date] **sender**: message` between `---` delimiters. Archived sessions in `thread-archive-*.md`.
-- **Boot prompts:** `docs/alpha-boot-prompt.md`, `docs/bravo-boot-prompt.md` — read on reboot to restore context.
-- **Design docs:** `docs/plans/` — the knowledge transfer mechanism, not conversation history.
-- **Dispatches must name exactly one owner** — learned from early duplicate work.
 
 ## Commit Conventions
 

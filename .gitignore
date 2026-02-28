@@ -9,3 +9,6 @@ build/
 .ruff_cache/
 .coverage
 .dev.vars
+
+# Internal docs — operational docs not for public tracking
+docs/internal/
