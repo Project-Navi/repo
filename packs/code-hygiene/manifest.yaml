@@ -1,0 +1,39 @@
+name: code-hygiene
+description: >
+  Add contribution guidelines with code quality rules,
+  development workflow, and pull request conventions.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions: {}
+loops: {}
+
+templates:
+  - src: CONTRIBUTING.md.j2
+    dest: CONTRIBUTING.md
+
+strip_suffix: ".j2"
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: code_style_rules
+      description: Project-specific code style rules to include
+      example: "Use type hints on all public functions"
+
+action_shas: []
+
+validation: []
+
+decisions:
+  - question: "Are there project-specific code style rules beyond the defaults?"
+    context: "The template includes universal rules (formatting, linting, testing). Project-specific rules can be added."
+  - question: "What is the preferred branch naming convention?"
+    context: "Common patterns: feature/*, fix/*, or free-form."

@@ -1,0 +1,68 @@
+name: 'nboot drift check'
+description: 'Detect configuration drift from navi-bootstrap template packs'
+author: 'Project Navi'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  spec:
+    description: 'Path to the nboot spec file'
+    required: false
+    default: 'nboot-spec.json'
+  pack:
+    description: 'Pack name (built-in) or path to a pack directory'
+    required: false
+    default: 'base'
+  target:
+    description: 'Project directory to check for drift'
+    required: false
+    default: '.'
+  skip-resolve:
+    description: 'Skip GitHub SHA resolution (offline mode)'
+    required: false
+    default: 'true'
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install nboot
+      shell: bash
+      run: pip install "${{ github.action_path }}"
+
+    - name: Resolve pack path
+      id: pack
+      shell: bash
+      run: |
+        PACK="${{ inputs.pack }}"
+        if [ -d "$PACK" ]; then
+          echo "path=$PACK" >> "$GITHUB_OUTPUT"
+        elif [ -d "${{ github.action_path }}/packs/$PACK" ]; then
+          echo "path=${{ github.action_path }}/packs/$PACK" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::Pack not found: $PACK (looked in ./$PACK and ${{ github.action_path }}/packs/$PACK)"
+          exit 1
+        fi
+
+    - name: Run drift check
+      shell: bash
+      run: |
+        ARGS=(
+          --spec "${{ inputs.spec }}"
+          --pack "${{ steps.pack.outputs.path }}"
+          --target "${{ inputs.target }}"
+        )
+        if [ "${{ inputs.skip-resolve }}" = "true" ]; then
+          ARGS+=(--skip-resolve)
+        fi
+        nboot diff "${ARGS[@]}"

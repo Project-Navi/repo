@@ -1,0 +1,85 @@
+{%- set pv = spec.python_version | default("3.12") -%}
+{%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
+{%- set test_versions = spec.recon.python_test_versions if spec.recon is defined and spec.recon.python_test_versions is defined else [pv] -%}
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-{% raw %}${{ github.head_ref || github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        python-version: {{ test_versions | tojson }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - name: Set up Python
+        uses: actions/setup-python@{{ action_shas.actions_setup_python }}  # {{ action_versions.actions_setup_python }}
+        with:
+          python-version: {% raw %}${{ matrix.python-version }}{% endraw %}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest {{ tst }}/ -v --cov={{ src }} --cov-report=term-missing
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - name: Set up Python
+        uses: actions/setup-python@{{ action_shas.actions_setup_python }}  # {{ action_versions.actions_setup_python }}
+        with:
+          python-version: "{{ pv }}"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check {{ src }}/ {{ tst }}/
+
+      - name: Format check
+        run: uv run ruff format --check {{ src }}/ {{ tst }}/
+
+      - name: Security scan
+        run: uv run bandit -r {{ src }} -ll
+
+      - name: Type check
+        run: uv run mypy {{ src }}/ --ignore-missing-imports

@@ -1,0 +1,51 @@
+name: quality-gates
+description: >
+  Initialize quality gate tracking files for ratcheting metrics.
+  Provides quality-gate.json (metric baselines) and test-parity-map.json
+  (source-to-test path mappings for non-standard naming).
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions: {}
+loops: {}
+
+templates:
+  - src: quality-gate.json.j2
+    dest: .github/quality-gate.json
+  - src: test-parity-map.json.j2
+    dest: .github/test-parity-map.json
+
+strip_suffix: ".j2"
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: initial_coverage
+      description: Starting coverage percentage (from recon)
+      example: 42
+    - name: initial_test_count
+      description: Starting test count (from recon)
+      example: 100
+
+action_shas: []
+
+validation:
+  - description: quality-gate.json is valid JSON
+    command: python -c "import json; json.load(open('.github/quality-gate.json'))"
+    expect: exit_code_0
+  - description: test-parity-map.json is valid JSON
+    command: python -c "import json; json.load(open('.github/test-parity-map.json'))"
+    expect: exit_code_0
+
+decisions:
+  - question: "What are the current baseline metrics for this project?"
+    context: "Coverage percentage and test count should come from running the test suite."
+  - question: "Are there source files with non-standard test naming?"
+    context: "Files where the test file name doesn't match the convention need explicit mapping."

@@ -1,0 +1,62 @@
+name: github-templates
+description: >
+  Add GitHub issue forms (bug report, feature request) and
+  pull request template for consistent contributor experience.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions: {}
+
+loops: {}
+
+templates:
+  - src: ISSUE_TEMPLATE/config.yml.j2
+    dest: .github/ISSUE_TEMPLATE/config.yml
+  - src: ISSUE_TEMPLATE/bug-report.yml.j2
+    dest: .github/ISSUE_TEMPLATE/bug_report.yml
+  - src: ISSUE_TEMPLATE/feature-request.yml.j2
+    dest: .github/ISSUE_TEMPLATE/feature_request.yml
+  - src: PULL_REQUEST_TEMPLATE.md.j2
+    dest: .github/PULL_REQUEST_TEMPLATE.md
+
+strip_suffix: ".j2"
+
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: bug_categories
+      description: Dropdown categories for bug reports
+      example: ["API", "CLI", "Documentation", "Security"]
+    - name: feature_categories
+      description: Dropdown categories for feature requests
+      example: ["New Feature", "Enhancement", "Integration"]
+    - name: docs_url
+      description: URL to project documentation site
+      example: "https://example.github.io/my-project"
+
+action_shas: []
+
+validation:
+  - description: Issue template config is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/config.yml'))"
+    expect: exit_code_0
+  - description: Bug report form is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/bug_report.yml'))"
+    expect: exit_code_0
+  - description: Feature request form is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/ISSUE_TEMPLATE/feature_request.yml'))"
+    expect: exit_code_0
+
+decisions:
+  - question: "What bug categories fit this project?"
+    context: "Categories should match the project's architecture domains."
+  - question: "Does this project have a documentation site to link?"
+    context: "If yes, provide the URL for the issue template config."

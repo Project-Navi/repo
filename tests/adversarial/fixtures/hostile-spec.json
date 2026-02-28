@@ -1,0 +1,31 @@
+{
+  "name": "n\u0430vi-b\u043e\u043etstr\u0430p",
+  "version": "{{ config.__class__ }}",
+  "description": "A \u200bnormal\u200b project\u0000with hidden {% import os %}payload",
+  "language": "python",
+  "python_version": "3.12",
+  "license": "MIT\u0000\u200b",
+  "author": {
+    "name": "\uff4e\uff45\uff4c\uff53\uff4f\uff4e",
+    "email": "test@example.com"
+  },
+  "structure": {
+    "src_dir": "../../../etc",
+    "test_dir": "/absolute/tests"
+  },
+  "modules": [
+    {"name": "../\u0000evil", "description": "{{ lipsum.__globals__['os'] }}"},
+    {"name": "n\u043ermal", "description": "{# hidden comment #}"}
+  ],
+  "features": {
+    "ci": true,
+    "pre_commit": true
+  },
+  "recon": {
+    "test_framework": "py\u200b\u200c\u200dtest",
+    "test_count": 125,
+    "existing_tools": {
+      "ruff": true
+    }
+  }
+}

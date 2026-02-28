@@ -1,0 +1,11 @@
+{%- set gh = spec.github | default({}) -%}
+blank_issues_enabled: false
+contact_links:
+{%- if gh.docs_url is defined and gh.docs_url %}
+  - name: Documentation
+    url: {{ gh.docs_url }}
+    about: Check the documentation before opening an issue
+{%- endif %}
+  - name: Security Vulnerability
+    url: https://github.com/{{ gh.org | default("OWNER") }}/{{ gh.repo | default(spec.name) }}/security/advisories/new
+    about: Report security vulnerabilities privately

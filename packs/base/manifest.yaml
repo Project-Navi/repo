@@ -1,0 +1,95 @@
+name: base
+description: >
+  Bootstrap target repo into a compatible state for elective packs.
+  Adds CI, pre-commit, tool configuration, dependency updates,
+  agent guidance, and debt tracking.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions:
+  "workflows/tests.yml.j2": "spec.features.ci"
+  "pre-commit-config.yaml.j2": "spec.features.pre_commit"
+  "secrets-baseline.json.j2": "spec.features.pre_commit"
+  "license-header.txt.j2": "spec.license"
+  "pyproject-tools.toml.j2": "!spec.recon.existing_tools.ruff"
+
+loops: {}
+
+templates:
+  - src: pre-commit-config.yaml.j2
+    dest: .pre-commit-config.yaml
+  - src: pyproject-tools.toml.j2
+    dest: pyproject.toml
+    mode: append
+  - src: dependabot.yml.j2
+    dest: .github/dependabot.yml
+  - src: workflows/tests.yml.j2
+    dest: .github/workflows/tests.yml
+  - src: CLAUDE.md.j2
+    dest: CLAUDE.md
+  - src: DEBT.md.j2
+    dest: DEBT.md
+  - src: license-header.txt.j2
+    dest: .license-header.txt
+  - src: secrets-baseline.json.j2
+    dest: .secrets.baseline
+
+strip_suffix: ".j2"
+
+hooks:
+  - "uv lock"
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: []
+
+inputs:
+  required:
+    - name: project_name
+      description: Python package name (the directory ruff/bandit/mypy scan)
+      example: "arctl"
+    - name: python_min_version
+      description: From requires-python in pyproject.toml
+      example: "3.9"
+    - name: target_repo_path
+      description: Absolute path to local clone of target repo
+  optional:
+    - name: optional_deps
+      description: List of optional dependencies needing mypy overrides
+      example: ["numpy", "torch", "sentence_transformers"]
+    - name: fork_account
+      description: GitHub username/org for fork-based PRs
+
+action_shas:
+  - name: actions_checkout
+    repo: actions/checkout
+    tag: v4.2.2
+  - name: harden_runner
+    repo: step-security/harden-runner
+    tag: v2.10.4
+  - name: actions_setup_python
+    repo: actions/setup-python
+    tag: v5.4.0
+
+validation:
+  - description: Pre-commit installs and runs clean
+    command: pre-commit run --all-files
+    expect: exit_code_0_or_warnings
+  - description: uv.lock generates without errors
+    command: uv lock
+    expect: exit_code_0
+  - description: Test suite still passes
+    command: python -m pytest tests/ -v
+    expect: exit_code_0
+  - description: All action SHAs resolve
+    method: sha_verification
+
+decisions:
+  - question: "Which navi-os patterns apply to this project's domain?"
+    context: "Not all security/quality patterns fit every project size and type."
+  - question: "Are there pre-existing lint violations to document?"
+    context: "Run ruff/mypy before committing. Document findings, don't fix them."
+  - question: "Should dev tool python_version markers be used?"
+    context: "If project supports older Python than dev tools require."

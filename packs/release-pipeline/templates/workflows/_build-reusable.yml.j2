@@ -1,0 +1,176 @@
+{%- set rel = spec.release | default({}) -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
+name: Reusable Build (SLSA L3)
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+{# Only declare the output if Docker is enabled #}
+{% if rel.has_docker | default(false) %}
+    outputs:
+      image_digest:
+        description: Docker image digest for attestation
+        value: {% raw %}${{ jobs.docker.outputs.digest }}{% endraw %}
+{% endif %}
+
+permissions: {}
+
+concurrency:
+  group: release-{% raw %}${{ inputs.tag_name }}{% endraw %}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@{{ action_shas.setup_uv }}  # {{ action_versions.setup_uv }}
+
+      - name: Set up Python
+        run: uv python install {{ spec.python_version | default("3.12") }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run test suite
+        run: uv run pytest {{ tst }}/ -x -q
+
+      - name: Generate SBOM (CycloneDX)
+        run: uv run cyclonedx-py environment --output-format json -o sbom.cdx.json
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@{{ action_shas.sbom_action }}  # {{ action_versions.sbom_action }}
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Generate license report
+        run: |
+          uv run pip-licenses --format=csv --with-urls --with-authors --output-file licenses.csv
+          uv run pip-licenses --format=plain-vertical --with-urls --with-authors --output-file licenses.txt
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@{{ action_shas.git_cliff_action }}  # {{ action_versions.git_cliff_action }}
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: release-notes.md
+          GITHUB_REPO: {% raw %}${{ github.repository }}{% endraw %}
+
+      - name: Fallback for empty release notes
+        env:
+          TAG_NAME: {% raw %}${{ inputs.tag_name }}{% endraw %}
+        run: |
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${TAG_NAME}" > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+          TAG_NAME: {% raw %}${{ inputs.tag_name }}{% endraw %}
+        run: |
+          gh release create "$TAG_NAME" \
+            --title "$TAG_NAME" \
+            --notes-file release-notes.md \
+            sbom.cdx.json \
+            sbom.spdx.json \
+            licenses.csv \
+            licenses.txt
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@{{ action_shas.attest_provenance }}  # {{ action_versions.attest_provenance }}
+        with:
+          subject-path: |
+            sbom.cdx.json
+            sbom.spdx.json
+            licenses.csv
+            licenses.txt
+
+{% if rel.has_docker | default(false) %}
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-and-release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    outputs:
+      digest: {% raw %}${{ steps.push.outputs.digest }}{% endraw %}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - uses: docker/setup-buildx-action@{{ action_shas.setup_buildx }}  # {{ action_versions.setup_buildx }}
+
+      - uses: docker/login-action@{{ action_shas.docker_login }}  # {{ action_versions.docker_login }}
+        with:
+          registry: ghcr.io
+          username: {% raw %}${{ github.actor }}{% endraw %}
+          password: {% raw %}${{ secrets.GITHUB_TOKEN }}{% endraw %}
+
+      - uses: docker/metadata-action@{{ action_shas.docker_metadata }}  # {{ action_versions.docker_metadata }}
+        id: meta
+        with:
+          images: ghcr.io/{% raw %}${{ github.repository }}{% endraw %}
+          tags: |
+            type=semver,pattern={% raw %}{{version}}{% endraw %}
+            type=semver,pattern={% raw %}{{major}}.{{minor}}{% endraw %}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@{{ action_shas.docker_build_push }}  # {{ action_versions.docker_build_push }}
+        with:
+          context: .
+          push: true
+          tags: {% raw %}${{ steps.meta.outputs.tags }}{% endraw %}
+          labels: {% raw %}${{ steps.meta.outputs.labels }}{% endraw %}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest Docker image
+        uses: actions/attest-build-provenance@{{ action_shas.attest_provenance }}  # {{ action_versions.attest_provenance }}
+        with:
+          subject-name: ghcr.io/{% raw %}${{ github.repository }}{% endraw %}
+          subject-digest: {% raw %}${{ steps.push.outputs.digest }}{% endraw %}
+          push-to-registry: true
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@{{ action_shas.trivy_action }}  # {{ action_versions.trivy_action }}
+        with:
+          image-ref: ghcr.io/{% raw %}${{ github.repository }}{% endraw %}@{% raw %}${{ steps.push.outputs.digest }}{% endraw %}
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@{{ action_shas.codeql_action }}  # {{ action_versions.codeql_action }}
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+{% endif %}

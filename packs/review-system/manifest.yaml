@@ -1,0 +1,43 @@
+name: review-system
+description: >
+  Add code review instruction files for GitHub Copilot and Claude Code.
+  Scopes review guidance to specific file patterns via applyTo frontmatter.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions: {}
+loops: {}
+
+templates:
+  - src: instructions/workflows.instructions.md.j2
+    dest: .github/instructions/workflows.instructions.md
+  - src: instructions/security.instructions.md.j2
+    dest: .github/instructions/security.instructions.md
+  - src: grippy.yaml.j2
+    dest: .grippy.yaml
+
+strip_suffix: ".j2"
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: security_src_path
+      description: Path to security-related source code
+      example: "src/myapp/security"
+
+action_shas: []
+
+validation: []
+
+decisions:
+  - question: "Does this project have a dedicated security module?"
+    context: "If yes, security review instructions will be scoped to that path."
+  - question: "What review focus areas matter most for this project?"
+    context: "Workflow security is universal. Application security varies by domain."

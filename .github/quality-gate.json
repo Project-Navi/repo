@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-27T00:00:00+00:00",
+  "coverage_pct": 89,
+  "test_count": 490,
+  "parity_violations": 0,
+  "unwired_symbols": 0,
+  "lifecycle_asymmetries": 0,
+  "error_contract_violations": 0
+}

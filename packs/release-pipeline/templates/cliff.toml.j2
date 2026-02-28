@@ -1,0 +1,30 @@
+[changelog]
+header = """
+# Changelog\n
+"""
+body = """
+{% raw %}{% for group, commits in commits | group_by(attribute="group") %}{% endraw %}
+    ## {% raw %}{{ group | striptags | trim | upper_first }}{% endraw %}
+    {% raw %}{% for commit in commits %}{% endraw %}
+    - {% raw %}{% if commit.scope %}{% endraw %}*({% raw %}{{ commit.scope }}{% endraw %})* {% raw %}{% endif %}{% endraw %}{% raw %}{{ commit.message | upper_first }}{% endraw %}
+    {% raw %}{% endfor %}{% endraw %}
+{% raw %}{% endfor %}{% endraw %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^doc", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = "^style", group = "Styling" },
+    { message = "^test", group = "Testing" },
+    { message = "^chore", group = "Miscellaneous" },
+]
+filter_commits = false
+tag_pattern = "v[0-9].*"

@@ -1,0 +1,37 @@
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+    "mypy>=1.8.0",
+    "bandit>=1.9.3",
+    "pre-commit>=4.0.0",
+    "detect-secrets>=1.5.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py{{ spec.python_version | default("3.12") | replace('.', '') }}"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "RUF", "C4"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "{{ spec.python_version | default("3.12") }}"
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+{% if spec.dependencies is defined and spec.dependencies.optional is defined %}
+
+{% for group, pkgs in spec.dependencies.optional.items() %}
+{% for pkg in pkgs %}
+[[tool.mypy.overrides]]
+module = "{{ pkg | replace('-', '_') }}.*"
+ignore_missing_imports = true
+{% endfor %}
+{% endfor %}
+{% endif %}

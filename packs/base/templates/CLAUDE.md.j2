@@ -1,0 +1,66 @@
+{%- set pv = spec.python_version | default("3.12") -%}
+{%- set src = spec.structure.src_dir | default("src") if spec.structure is defined else "src" -%}
+{%- set tst = spec.structure.test_dir | default("tests") if spec.structure is defined else "tests" -%}
+# CLAUDE.md
+
+This file provides guidance to Claude Code when working with code in this repository.
+
+## Project Overview
+
+**{{ spec.name }}**{% if spec.description is defined %} — {{ spec.description }}{% endif %}
+
+- **Language:** {{ spec.language }}
+- **Python version:** >= {{ pv }}
+{% if spec.structure is defined and spec.structure.src_dir is defined %}- **Source:** `{{ src }}/`
+{% endif %}- **Tests:** `{{ tst }}/`
+
+## Development Commands
+
+```bash
+# Install dependencies
+uv sync
+
+# Run tests
+uv run pytest {{ tst }}/ -v
+
+# Run tests with coverage
+uv run pytest {{ tst }}/ -v --cov={{ src }} --cov-report=term-missing
+
+# Lint
+uv run ruff check {{ src }}/ {{ tst }}/
+
+# Format
+uv run ruff format {{ src }}/ {{ tst }}/
+
+# Type check
+uv run mypy {{ src }}/
+
+# Security scan
+uv run bandit -r {{ src }} -ll
+
+# Run all quality checks
+uv run ruff format --check {{ src }}/ {{ tst }}/ && uv run ruff check {{ src }}/ {{ tst }}/ && uv run mypy {{ src }}/
+
+# Pre-commit (run all hooks)
+pre-commit run --all-files
+```
+
+## Code Quality Standards
+
+- Line length: 100 characters
+- Linter: ruff (select: E, F, I, N, W, UP, B, RUF, C4)
+- Type checking: mypy (strict mode)
+- Security: bandit
+- Secret detection: detect-secrets with baseline
+
+## Commit Conventions
+
+- Use conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`
+- Keep commits atomic — one logical change per commit
+- Run quality checks before committing
+
+## Scope Boundaries
+
+- Do not modify files outside `{{ src }}/` and `{{ tst }}/` without explicit approval
+- Do not bump `requires-python` or change dependency version constraints without discussion
+- Document pre-existing violations in DEBT.md rather than fixing them silently

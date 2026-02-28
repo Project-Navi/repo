@@ -1,0 +1,52 @@
+name: CodeQL Analysis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "30 5 * * 1"  # Monday 05:30 UTC
+
+concurrency:
+  group: codeql-{% raw %}${{ github.head_ref || github.ref }}{% endraw %}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze ({% raw %}${{ matrix.language }}{% endraw %})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: {{ spec.recon.codeql_languages | tojson if spec.recon is defined and spec.recon.codeql_languages is defined else [spec.language] | tojson }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@{{ action_shas.harden_runner }}  # {{ action_versions.harden_runner }}
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@{{ action_shas.actions_checkout }}  # {{ action_versions.actions_checkout }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@{{ action_shas.codeql_action }}  # {{ action_versions.codeql_action }}
+        with:
+          languages: {% raw %}${{ matrix.language }}{% endraw %}
+          queries: +security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@{{ action_shas.codeql_action }}  # {{ action_versions.codeql_action }}
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@{{ action_shas.codeql_action }}  # {{ action_versions.codeql_action }}
+        with:
+          category: "/language:{% raw %}${{ matrix.language }}{% endraw %}"

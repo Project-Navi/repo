@@ -1,0 +1,66 @@
+name: security-scanning
+description: >
+  Add CodeQL static analysis and OpenSSF Scorecard workflows.
+  Requires GitHub Advanced Security for private repos.
+
+version: "0.1.0"
+
+# --- Engine fields (processed by the engine) ---
+
+conditions:
+  "workflows/codeql.yml.j2": "spec.features.ci"
+  "workflows/scorecard.yml.j2": "spec.features.ci"
+
+loops: {}
+
+templates:
+  - src: workflows/codeql.yml.j2
+    dest: .github/workflows/codeql.yml
+  - src: workflows/scorecard.yml.j2
+    dest: .github/workflows/scorecard.yml
+
+strip_suffix: ".j2"
+
+hooks: []
+
+# --- Agent-workflow fields (read by the agent, ignored by engine) ---
+
+dependencies: [base]
+
+inputs:
+  required: []
+  optional:
+    - name: codeql_languages
+      description: Languages for CodeQL analysis matrix
+      example: ["python", "javascript"]
+    - name: scorecard_publish
+      description: Whether to publish Scorecard results (public repos)
+      example: true
+
+action_shas:
+  - name: actions_checkout
+    repo: actions/checkout
+    tag: v4.2.2
+  - name: harden_runner
+    repo: step-security/harden-runner
+    tag: v2.10.4
+  - name: codeql_action
+    repo: github/codeql-action
+    tag: v3.28.13
+  - name: scorecard_action
+    repo: ossf/scorecard-action
+    tag: v2.4.0
+
+validation:
+  - description: CodeQL workflow is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/workflows/codeql.yml'))"
+    expect: exit_code_0
+  - description: Scorecard workflow is valid YAML
+    command: python -c "import yaml; yaml.safe_load(open('.github/workflows/scorecard.yml'))"
+    expect: exit_code_0
+
+decisions:
+  - question: "Does this project need CodeQL for languages beyond the primary?"
+    context: "Multi-language repos (e.g. Python + JS) benefit from scanning all languages."
+  - question: "Should Scorecard results be published publicly?"
+    context: "Public repos can publish to the OpenSSF dashboard. Private repos typically don't."
